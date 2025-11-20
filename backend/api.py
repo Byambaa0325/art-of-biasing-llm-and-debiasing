@@ -11,7 +11,7 @@ Provides endpoints for:
 Designed for Google Cloud Run deployment.
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -20,6 +20,7 @@ import uuid
 import json
 from datetime import datetime
 from typing import Any
+from pathlib import Path
 
 # Handle imports for both local development and production (gunicorn)
 # When running locally: direct imports work
@@ -128,7 +129,12 @@ def sanitize_for_json(obj: Any) -> Any:
     # Fallback: convert to string
     return str(obj)
 
-app = Flask(__name__)
+# Determine frontend build directory
+FRONTEND_BUILD_DIR = Path(__file__).parent.parent / "frontend-react" / "build"
+if not FRONTEND_BUILD_DIR.exists():
+    FRONTEND_BUILD_DIR = Path("/app/frontend-react/build")  # Docker path
+
+app = Flask(__name__, static_folder=str(FRONTEND_BUILD_DIR), static_url_path='')
 # Allow all origins for Cloud Run deployment
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
@@ -1014,11 +1020,18 @@ def explain_bias():
 
 
 @app.route('/', methods=['GET'])
-def root():
-    """Root endpoint with API information"""
+def serve_frontend():
+    """Serve React frontend index.html"""
+    if FRONTEND_BUILD_DIR.exists():
+        index_path = FRONTEND_BUILD_DIR / 'index.html'
+        if index_path.exists():
+            return send_file(str(index_path))
+    
+    # Fallback: API info if frontend not available
     return jsonify({
         'message': 'Bias Analysis API',
         'version': '2.1',
+        'note': 'Frontend not available. Use /api endpoints.',
         'vertex_llm_available': VERTEX_LLM_AVAILABLE,
         'hearts_available': HEARTS_AGGREGATOR_AVAILABLE,
         'features': {
@@ -1037,6 +1050,30 @@ def root():
             'GET /api/health': 'Health check'
         }
     })
+
+
+@app.route('/<path:path>', methods=['GET'])
+def serve_frontend_routes(path):
+    """
+    Serve React frontend files and handle client-side routing.
+    All non-API routes serve the React app (for client-side routing).
+    """
+    # Don't interfere with API routes
+    if path.startswith('api/'):
+        return jsonify({'error': 'API endpoint not found'}), 404
+    
+    # Serve static files if they exist
+    if FRONTEND_BUILD_DIR.exists():
+        file_path = FRONTEND_BUILD_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return send_from_directory(str(FRONTEND_BUILD_DIR), path)
+        
+        # For client-side routing, serve index.html for all routes
+        index_path = FRONTEND_BUILD_DIR / 'index.html'
+        if index_path.exists():
+            return send_file(str(index_path))
+    
+    return jsonify({'error': 'Not found'}), 404
 
 
 if __name__ == '__main__':
