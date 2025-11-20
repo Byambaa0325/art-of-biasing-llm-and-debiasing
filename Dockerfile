@@ -18,10 +18,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Build React frontend (needs dev dependencies for build)
-COPY frontend-react/package*.json ./frontend-react/
+# Copy package files - npm install will regenerate package-lock.json if needed
+COPY frontend-react/package.json ./frontend-react/
 WORKDIR /app/frontend-react
 # Install all dependencies (including dev dependencies needed for build)
-RUN npm ci && npm cache clean --force
+# Use npm install to handle lock file mismatches (will update lock file if needed)
+RUN npm install --legacy-peer-deps && npm cache clean --force
 WORKDIR /app
 
 # Copy frontend source and build
