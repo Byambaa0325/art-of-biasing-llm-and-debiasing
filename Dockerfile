@@ -14,6 +14,25 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download HEARTS model during build (bakes into image)
+# This prevents downloading on every Cloud Run cold start
+RUN mkdir -p /app/.cache/huggingface && \
+    python -c "\
+import os; \
+os.environ['TRANSFORMERS_CACHE'] = '/app/.cache/huggingface'; \
+try: \
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
+    print('Downloading HEARTS model...'); \
+    tokenizer = AutoTokenizer.from_pretrained('holistic-ai/bias_classifier_albertv2'); \
+    model = AutoModelForSequenceClassification.from_pretrained('holistic-ai/bias_classifier_albertv2'); \
+    print('✓ HEARTS model downloaded successfully'); \
+except Exception as e: \
+    print(f'Warning: Could not download HEARTS model: {e}'); \
+    print('Model will be downloaded on first use (slower cold starts)'); \
+    import traceback; \
+    traceback.print_exc(); \
+"
+
 # Copy application code
 COPY backend/ ./backend/
 COPY .env* ./
@@ -23,6 +42,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV FLASK_APP=backend.api
 ENV FLASK_ENV=production
+# Use local cached model (pre-downloaded in image)
+ENV HEARTS_LOCAL_FILES_ONLY=true
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 
 # Expose port (Cloud Run uses PORT env var)
 EXPOSE 8080
@@ -30,8 +52,10 @@ EXPOSE 8080
 # Use gunicorn for production
 RUN pip install gunicorn
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user for security and ensure cache is accessible
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app/.cache
 USER appuser
 
 # Run the application

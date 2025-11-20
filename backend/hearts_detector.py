@@ -79,15 +79,76 @@ class HEARTSDetector:
 
         print(f"Loading HEARTS model: {self.model_name} on {self.device}...")
 
-        # Load model and tokenizer
+        # Load model and tokenizer with production-friendly settings
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            import os
+            # Use local_files_only if model is cached (for production)
+            local_files_only = os.getenv('HEARTS_LOCAL_FILES_ONLY', 'false').lower() == 'true'
+            
+            # Set cache directory if specified (useful for Cloud Run with persistent disk)
+            cache_dir = os.getenv('HF_HOME') or os.getenv('TRANSFORMERS_CACHE')
+            
+            # Default cache location (works in Docker/Cloud Run)
+            if not cache_dir:
+                cache_dir = os.path.expanduser('~/.cache/huggingface')
+                # Also try /app/.cache/huggingface (common in Docker)
+                if not os.path.exists(cache_dir):
+                    alt_cache = '/app/.cache/huggingface'
+                    if os.path.exists(alt_cache):
+                        cache_dir = alt_cache
+            
+            load_kwargs = {}
+            if cache_dir:
+                load_kwargs['cache_dir'] = cache_dir
+            if local_files_only:
+                load_kwargs['local_files_only'] = True
+                print(f"  Using local files only (cache_dir: {cache_dir})")
+            elif cache_dir:
+                print(f"  Using cache directory: {cache_dir}")
+            
+            # Load tokenizer first (smaller, faster)
+            print(f"  Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                **load_kwargs
+            )
+            
+            # Load model (larger, may take time)
+            print(f"  Loading model (this may take a minute on first run)...")
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.model_name,
+                **load_kwargs
+            )
+            
+            # Move to device and set eval mode
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
-            print(f"✓ HEARTS model loaded successfully")
+            print(f"✓ HEARTS model loaded successfully on {self.device}")
         except Exception as e:
-            raise Exception(f"Failed to load HEARTS model: {str(e)}")
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            # Provide helpful error messages
+            if "Connection" in error_type or "timeout" in error_msg.lower():
+                raise Exception(
+                    f"Failed to download HEARTS model (network error): {error_msg}\n"
+                    f"  Tip: Set HEARTS_LOCAL_FILES_ONLY=true if model is already cached"
+                )
+            elif "disk" in error_msg.lower() or "space" in error_msg.lower():
+                raise Exception(
+                    f"Failed to load HEARTS model (disk space): {error_msg}\n"
+                    f"  Tip: Free up disk space or set TRANSFORMERS_CACHE to a location with more space"
+                )
+            elif "memory" in error_msg.lower() or "OOM" in error_msg:
+                raise Exception(
+                    f"Failed to load HEARTS model (out of memory): {error_msg}\n"
+                    f"  Tip: Increase container memory or use CPU device"
+                )
+            else:
+                raise Exception(
+                    f"Failed to load HEARTS model: {error_msg}\n"
+                    f"  Error type: {error_type}"
+                )
 
         # Initialize SHAP explainer (optional)
         self.shap_explainer = None

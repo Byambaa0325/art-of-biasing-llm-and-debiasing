@@ -136,15 +136,39 @@ bias_detector = BiasDetector()
 bias_injector = BiasInjector()
 debiaser = PromptDebiaser()
 
-# Initialize HEARTS bias aggregator (optional)
+# Initialize HEARTS bias aggregator (optional, lazy-loaded)
+# Use lazy initialization to avoid blocking startup in production
 bias_aggregator = None
 if HEARTS_AGGREGATOR_AVAILABLE and BiasAggregator:
     try:
-        bias_aggregator = BiasAggregator()
-        print("✓ HEARTS bias aggregator initialized")
+        # Lazy initialization: HEARTS model will load on first use, not at startup
+        # This prevents startup failures in production if model download fails
+        enable_hearts = os.getenv('ENABLE_HEARTS', 'true').lower() == 'true'
+        lazy_hearts = os.getenv('HEARTS_LAZY_LOAD', 'true').lower() == 'true'
+        
+        bias_aggregator = BiasAggregator(
+            use_hearts=enable_hearts,
+            lazy_hearts=lazy_hearts
+        )
+        if lazy_hearts:
+            print("✓ HEARTS bias aggregator ready (lazy-loaded)")
+        else:
+            print("✓ HEARTS bias aggregator initialized")
     except Exception as e:
-        print(f"Warning: Could not initialize HEARTS aggregator: {e}")
+        print(f"Warning: Could not create HEARTS aggregator: {e}")
+        import traceback
+        traceback.print_exc()
         HEARTS_AGGREGATOR_AVAILABLE = False
+        bias_aggregator = None
+
+def get_bias_aggregator():
+    """
+    Get the bias aggregator instance, ensuring it's available.
+    
+    Returns:
+        BiasAggregator instance or None if not available
+    """
+    return bias_aggregator
 
 # Set LLM_AVAILABLE based on Vertex AI availability
 LLM_AVAILABLE = VERTEX_LLM_AVAILABLE
@@ -469,11 +493,26 @@ def health_check():
     """
     Health check endpoint (no auth required).
     """
+    # Check HEARTS initialization status
+    hearts_status = {
+        'available': HEARTS_AGGREGATOR_AVAILABLE,
+        'initialized': False,
+        'error': None
+    }
+    
+    if bias_aggregator:
+        try:
+            hearts_status['initialized'] = getattr(bias_aggregator, '_hearts_initialized', False)
+            if hasattr(bias_aggregator, '_hearts_init_error') and bias_aggregator._hearts_init_error:
+                hearts_status['error'] = bias_aggregator._hearts_init_error
+        except Exception:
+            pass  # Ignore errors when checking status
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'features': {
-            'hearts_available': HEARTS_AGGREGATOR_AVAILABLE,
+            'hearts': hearts_status,
             'vertex_ai_available': VERTEX_LLM_AVAILABLE,
             'security_enabled': SecurityConfig.REQUIRE_API_KEY if SecurityConfig else False
         }

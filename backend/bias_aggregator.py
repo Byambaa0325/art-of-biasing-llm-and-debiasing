@@ -52,7 +52,8 @@ class BiasAggregator:
     def __init__(
         self,
         use_hearts: bool = True,
-        llm_service: Optional[VertexLLMService] = None
+        llm_service: Optional[VertexLLMService] = None,
+        lazy_hearts: bool = True
     ):
         """
         Initialize bias aggregator.
@@ -60,26 +61,55 @@ class BiasAggregator:
         Args:
             use_hearts: Enable HEARTS ML detection (default: True if available)
             llm_service: Optional Vertex AI LLM service for validation
+            lazy_hearts: If True, initialize HEARTS only when first needed (default: True)
+                         Set to False to initialize immediately (may block startup)
         """
         # Layer 1: Rule-based detector (always available)
         self.rule_detector = BiasDetector()
 
-        # Layer 2: HEARTS detector (optional)
+        # Layer 2: HEARTS detector (optional, lazy-loaded by default)
         self.hearts_detector = None
-        if use_hearts and HEARTS_AVAILABLE:
-            try:
-                self.hearts_detector = HEARTSDetector()
-                print("✓ HEARTS detector enabled")
-            except Exception as e:
-                print(f"Warning: Could not initialize HEARTS: {e}")
-                self.hearts_detector = None
+        self._hearts_initialized = False
+        self._hearts_init_error = None
+        self.use_hearts = use_hearts and HEARTS_AVAILABLE
+        
+        if use_hearts and HEARTS_AVAILABLE and not lazy_hearts:
+            # Eager initialization (for backward compatibility)
+            self._initialize_hearts()
 
         # Layer 3: LLM validation (optional)
         self.llm_service = llm_service
 
         # Configuration
-        self.hearts_enabled = self.hearts_detector is not None
+        self.hearts_enabled = self.use_hearts
         self.llm_enabled = self.llm_service is not None
+    
+    def _initialize_hearts(self):
+        """Lazy initialization of HEARTS detector"""
+        if self._hearts_initialized:
+            return
+        
+        if not self.use_hearts:
+            return
+        
+        if self._hearts_init_error:
+            # Don't retry if we already failed
+            return
+        
+        try:
+            print("Initializing HEARTS detector (lazy load)...")
+            self.hearts_detector = HEARTSDetector()
+            self._hearts_initialized = True
+            print("✓ HEARTS detector initialized successfully")
+        except Exception as e:
+            error_msg = str(e)
+            self._hearts_init_error = error_msg
+            print(f"Warning: Could not initialize HEARTS: {error_msg}")
+            print(f"  HEARTS will be disabled. Error details: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            self.hearts_detector = None
+            self.hearts_enabled = False
 
     def detect_all_layers(
         self,
@@ -114,19 +144,29 @@ class BiasAggregator:
         result['layers_used'].append('rule-based')
         result['detection_sources'].append('Rule-based (BEATS, Neumann et al.)')
 
-        # Layer 2: HEARTS ML detection
+        # Layer 2: HEARTS ML detection (lazy initialization)
         hearts_result = None
-        if use_hearts and self.hearts_enabled:
-            try:
-                hearts_result = self.hearts_detector.detect_stereotypes(
-                    prompt,
-                    explain=explain
-                )
-                result['hearts'] = hearts_result
-                result['layers_used'].append('HEARTS')
-                result['detection_sources'].append('HEARTS ALBERT-v2 (King et al., 2024)')
-            except Exception as e:
-                print(f"Warning: HEARTS detection failed: {e}")
+        if use_hearts and self.use_hearts:
+            # Lazy initialize HEARTS if not already done
+            if not self._hearts_initialized:
+                self._initialize_hearts()
+            
+            if self.hearts_detector is not None:
+                try:
+                    hearts_result = self.hearts_detector.detect_stereotypes(
+                        prompt,
+                        explain=explain
+                    )
+                    result['hearts'] = hearts_result
+                    result['layers_used'].append('HEARTS')
+                    result['detection_sources'].append('HEARTS ALBERT-v2 (King et al., 2024)')
+                except Exception as e:
+                    print(f"Warning: HEARTS detection failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+            elif self._hearts_init_error:
+                # Log that HEARTS is unavailable due to initialization error
+                result['hearts_error'] = f"HEARTS unavailable: {self._hearts_init_error}"
 
         # Layer 3: Gemini validation (optional - expensive)
         gemini_result = None
