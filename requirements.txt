@@ -8,3 +8,11 @@ google-auth>=2.23.0
 google-auth-oauthlib>=1.1.0
 google-auth-httplib2>=0.1.1
 
+# HEARTS Model Dependencies (for ML-based bias detection)
+transformers>=4.30.0
+torch>=2.0.0
+shap>=0.42.0
+lime>=0.2.0.1
+scikit-learn>=1.3.0
+numpy>=1.24.0
+

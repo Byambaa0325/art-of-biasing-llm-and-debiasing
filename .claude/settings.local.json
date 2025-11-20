@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:arxiv.org)",
+      "WebSearch",
+      "Bash(python api.py:*)",
+      "Bash(timeout:*)",
+      "Bash(nul)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -231,8 +231,65 @@ Our debiasing methods align with:
 - **Representation-based Debiasing** (Xu et al., LREC 2024): Removing bias vectors from latent states
 - **Instruction-based Normalization** (BiasFreeBench, 2024): Adding fairness instructions
 
+## 11. Large-Scale Cognitive Bias Benchmark (Malberg et al., 2025)
+
+**Malberg et al. (2025)** presents the most comprehensive evaluation of cognitive biases in LLMs to date: [A Comprehensive Evaluation of Cognitive Biases in LLMs](https://aclanthology.org/2025.nlp4dh-1.50.pdf)
+
+### Key Contributions
+
+1. **30 Cognitive Biases Evaluated**: Most comprehensive coverage to date
+2. **20 State-of-the-Art LLMs Tested**: From OpenAI, Meta, Anthropic, Google, Mistral, Microsoft, Alibaba, 01.AI
+3. **30,000 Tests Generated**: Covering 200 managerial decision-making scenarios
+4. **Systematic Test Framework**: General-purpose framework for reliable test generation with LLM-based diversification
+5. **Verified Test Generation**: IFEVAL verification achieving 96.7% - 100% accuracy
+
+### Cognitive Biases in Malberg et al. Taxonomy
+
+The study systematically evaluated 30 biases ranked by management literature frequency:
+
+**High-Frequency Biases**:
+- Conservatism (#2)
+- Anchoring (#3) - Also in our tool
+- Stereotyping (#4)
+- Social Desirability Bias (#5)
+- Loss Aversion (#6)
+- Halo Effect (#7) - Also in our tool
+- Reactance (#8)
+- Confirmation Bias (#10) - Also in our tool
+
+**Additional Biases Evaluated**:
+- Status-Quo Bias (#20)
+- Hindsight Bias (#21)
+- Self-Serving Bias (#22)
+- Availability Heuristic (#23)
+- Bandwagon Effect (#25)
+- Endowment Effect (#26)
+- Framing Effect (#27) - Also in our tool
+- Fundamental Attribution Error (#29)
+- Planning Fallacy (#30)
+- Hyperbolic Discounting (#31)
+- Negativity Bias (#32) - Also in our tool
+- In-Group Bias (#34)
+- And 13 more...
+
+### Methodology
+
+- **Template-Based Generation**: Control and treatment templates for each bias
+- **LLM Diversification**: LLMs fill template gaps with diverse content
+- **Verification**: IFEVAL ensures tests follow instructions (96.7-100% accuracy)
+- **Comparison**: Control vs treatment responses indicate bias presence
+
+### Relevance to Our Tool
+
+1. **Bias Coverage Expansion**: Can integrate 20+ additional biases from this taxonomy
+2. **Test Methodology**: Can adapt their systematic template approach
+3. **Verification**: Can implement IFEVAL-style verification
+4. **Model Comparison**: Can compare findings across different Vertex AI models
+5. **Benchmark Integration**: Can contribute to systematic bias evaluation
+
 ## References
 
+- **Malberg, S., Poletukhin, R., Schuster, C. M., & Groh, G. (2025)**. A Comprehensive Evaluation of Cognitive Biases in LLMs. *NLP4DH 2025*. [https://aclanthology.org/2025.nlp4dh-1.50.pdf](https://aclanthology.org/2025.nlp4dh-1.50.pdf)
 - Neumann, M., et al. (FAccT 2025). System vs. user prompt bias
 - Echterhoff, J., et al. (2024). Cognitive Bias in Decision-Making with LLMs. [arXiv:2403.00811](https://arxiv.org/pdf/2403.00811) - BiasBuster framework
 - Sun, X., & Kok, S. (2025). Cognitive bias injection in prompts

@@ -20,6 +20,7 @@ COPY .env* ./
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 ENV FLASK_APP=backend.api
 ENV FLASK_ENV=production
 

@@ -13,24 +13,120 @@ Designed for Google Cloud Run deployment.
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from bias_detection import BiasDetector
-from bias_injection import BiasInjector
-from debiasing import PromptDebiaser
 from dotenv import load_dotenv
 import os
+import sys
 import uuid
+import json
+from datetime import datetime
+from typing import Any
+
+# Handle imports for both local development and production (gunicorn)
+# When running locally: direct imports work
+# When running with gunicorn (backend.api:app): need relative or absolute imports
+try:
+    # Try relative imports first (works when backend is a package)
+    from .bias_detection import BiasDetector
+    from .bias_injection import BiasInjector
+    from .debiasing import PromptDebiaser
+except ImportError:
+    # Fallback to absolute imports (works in local development)
+    try:
+        from bias_detection import BiasDetector
+        from bias_injection import BiasInjector
+        from debiasing import PromptDebiaser
+    except ImportError:
+        # Last resort: add backend to path and import
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        from bias_detection import BiasDetector
+        from bias_injection import BiasInjector
+        from debiasing import PromptDebiaser
+
+# Import HEARTS bias aggregator (optional - requires transformers + torch)
+try:
+    from .bias_aggregator import BiasAggregator, is_aggregator_available
+    HEARTS_AGGREGATOR_AVAILABLE = is_aggregator_available()
+except ImportError:
+    try:
+        from bias_aggregator import BiasAggregator, is_aggregator_available
+        HEARTS_AGGREGATOR_AVAILABLE = is_aggregator_available()
+    except ImportError:
+        HEARTS_AGGREGATOR_AVAILABLE = False
+        BiasAggregator = None
+        print("HEARTS bias aggregator not available. Install: pip install transformers torch shap lime")
+
+# Import security and rate limiting
+try:
+    from .security import require_api_key, rate_limit, admin_only, usage_tracker, SecurityConfig
+except ImportError:
+    try:
+        from security import require_api_key, rate_limit, admin_only, usage_tracker, SecurityConfig
+    except ImportError:
+        print("Warning: Security module not available. API will be unprotected!")
+        # Provide no-op decorators if security module not available
+        def require_api_key(f): return f
+        def rate_limit(**kwargs): return lambda f: f
+        def admin_only(f): return f
+        usage_tracker = None
+        SecurityConfig = None
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Vertex AI LLM service (for Google Cloud)
 try:
-    from vertex_llm_service import get_vertex_llm_service
+    # Try relative import first (for gunicorn)
+    from .vertex_llm_service import get_vertex_llm_service
     VERTEX_LLM_AVAILABLE = True
-except Exception as e:
-    VERTEX_LLM_AVAILABLE = False
-    print(f"Vertex AI LLM service not available: {e}")
-    print("To enable LLM features, set GOOGLE_CLOUD_PROJECT")
+except ImportError:
+    try:
+        # Fallback to absolute import (for local development)
+        from vertex_llm_service import get_vertex_llm_service
+        VERTEX_LLM_AVAILABLE = True
+    except Exception as e:
+        VERTEX_LLM_AVAILABLE = False
+        print(f"Vertex AI LLM service not available: {e}")
+        print("To enable LLM features, set GOOGLE_CLOUD_PROJECT")
+
+def sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively convert any object to JSON-serializable primitives.
+    This prevents 'Object of type X is not JSON serializable' errors.
+
+    Args:
+        obj: Any Python object
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    # Handle None
+    if obj is None:
+        return None
+
+    # Handle primitives
+    if isinstance(obj, (bool, int, float, str)):
+        return obj
+
+    # Handle lists/tuples
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_for_json(item) for item in obj]
+
+    # Handle dicts
+    if isinstance(obj, dict):
+        return {str(key): sanitize_for_json(value) for key, value in obj.items()}
+
+    # Handle sets
+    if isinstance(obj, set):
+        return [sanitize_for_json(item) for item in obj]
+
+    # Handle objects with __dict__ (convert to dict)
+    if hasattr(obj, '__dict__'):
+        return sanitize_for_json(obj.__dict__)
+
+    # Fallback: convert to string
+    return str(obj)
 
 app = Flask(__name__)
 # Allow all origins for Cloud Run deployment
@@ -39,6 +135,34 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 bias_detector = BiasDetector()
 bias_injector = BiasInjector()
 debiaser = PromptDebiaser()
+
+# Initialize HEARTS bias aggregator (optional)
+bias_aggregator = None
+if HEARTS_AGGREGATOR_AVAILABLE and BiasAggregator:
+    try:
+        bias_aggregator = BiasAggregator()
+        print("✓ HEARTS bias aggregator initialized")
+    except Exception as e:
+        print(f"Warning: Could not initialize HEARTS aggregator: {e}")
+        HEARTS_AGGREGATOR_AVAILABLE = False
+
+# Set LLM_AVAILABLE based on Vertex AI availability
+LLM_AVAILABLE = VERTEX_LLM_AVAILABLE
+
+def get_llm_service():
+    """Get LLM service (Vertex AI)"""
+    if not VERTEX_LLM_AVAILABLE:
+        raise Exception("Vertex AI LLM service not available")
+    return get_vertex_llm_service()
+
+# Set LLM_AVAILABLE based on Vertex AI availability
+LLM_AVAILABLE = VERTEX_LLM_AVAILABLE
+
+def get_llm_service():
+    """Get LLM service (Vertex AI)"""
+    if not VERTEX_LLM_AVAILABLE:
+        raise Exception("Vertex AI LLM service not available")
+    return get_vertex_llm_service()
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -50,92 +174,120 @@ def analyze_prompt():
     - Debiased versions (rule-based and optionally LLM-based)
     - LLM answers comparison (if LLM is available)
     """
-    data = request.get_json()
-    prompt = data.get('prompt', '')
-    use_llm = data.get('use_llm', False) and LLM_AVAILABLE
-    generate_answers = data.get('generate_answers', False) and LLM_AVAILABLE
-    
-    if not prompt:
-        return jsonify({'error': 'No prompt provided'}), 400
-    
-    result = {
-        'original_prompt': prompt,
-        'detected_biases': None,
-        'biased_versions': [],
-        'debiased_versions': [],
-        'llm_available': LLM_AVAILABLE,
-        'answers_comparison': None
-    }
-    
-    # Detect biases
-    result['detected_biases'] = bias_detector.detect_biases(prompt)
-    
-    # Generate biased versions (rule-based)
-    result['biased_versions'] = bias_injector.inject_biases(prompt)
-    
-    # Generate LLM-based biased versions if requested
-    if use_llm:
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+            
+        prompt = data.get('prompt', '')
+        use_llm = data.get('use_llm', False) and LLM_AVAILABLE
+        generate_answers = data.get('generate_answers', False) and LLM_AVAILABLE
+        
+        if not prompt:
+            return jsonify({'error': 'No prompt provided'}), 400
+        
+        result = {
+            'original_prompt': prompt,
+            'detected_biases': None,
+            'biased_versions': [],
+            'debiased_versions': [],
+            'llm_available': LLM_AVAILABLE,
+            'answers_comparison': None
+        }
+        
+        # Detect biases
         try:
-            llm = get_llm_service()
-            llm_biased = llm.inject_bias_llm(prompt, "confirmation")
-            result['biased_versions'].append(llm_biased)
+            result['detected_biases'] = bias_detector.detect_biases(prompt)
         except Exception as e:
-            result['llm_error'] = str(e)
-    
-    # Generate debiased versions (rule-based)
-    result['debiased_versions'] = debiaser.get_all_debiasing_methods(prompt)
-    
-    # Generate LLM-based debiased version if requested
-    if use_llm:
+            print(f"Error in bias detection: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Bias detection failed: {str(e)}'}), 500
+        
+        # Generate biased versions (rule-based)
         try:
-            llm = get_llm_service()
-            llm_debiased = llm.debias_self_help(prompt)
-            result['debiased_versions'].append(llm_debiased)
+            result['biased_versions'] = bias_injector.inject_biases(prompt)
         except Exception as e:
-            if 'llm_error' not in result:
+            print(f"Error in bias injection: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Bias injection failed: {str(e)}'}), 500
+        
+        # Generate LLM-based biased versions if requested
+        if use_llm:
+            try:
+                llm = get_llm_service()
+                llm_biased = llm.inject_bias_llm(prompt, "confirmation")
+                result['biased_versions'].append(llm_biased)
+            except Exception as e:
                 result['llm_error'] = str(e)
-    
-    # Generate and compare answers if requested
-    if generate_answers:
+        
+        # Generate debiased versions (rule-based)
         try:
-            llm = get_llm_service()
-            original_answer = llm.generate_answer(prompt)
-            
-            answers_comparison = {
-                'original_prompt': prompt,
-                'original_answer': original_answer,
-                'modified_versions': []
-            }
-            
-            # Compare with first biased version if available
-            if result['biased_versions']:
-                biased_prompt = result['biased_versions'][0].get('biased_prompt', '')
-                if biased_prompt:
-                    biased_answer = llm.generate_answer(biased_prompt)
-                    answers_comparison['modified_versions'].append({
-                        'type': 'biased',
-                        'prompt': biased_prompt,
-                        'answer': biased_answer,
-                        'bias_type': result['biased_versions'][0].get('bias_added', 'Unknown')
-                    })
-            
-            # Compare with first debiased version if available
-            if result['debiased_versions']:
-                debiased_prompt = result['debiased_versions'][0].get('debiased_prompt', '')
-                if debiased_prompt:
-                    debiased_answer = llm.generate_answer(debiased_prompt)
-                    answers_comparison['modified_versions'].append({
-                        'type': 'debiased',
-                        'prompt': debiased_prompt,
-                        'answer': debiased_answer,
-                        'method': result['debiased_versions'][0].get('method', 'Unknown')
-                    })
-            
-            result['answers_comparison'] = answers_comparison
+            result['debiased_versions'] = debiaser.get_all_debiasing_methods(prompt)
         except Exception as e:
-            result['answers_error'] = str(e)
+            print(f"Error in debiasing: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Debiasing failed: {str(e)}'}), 500
+        
+        # Generate LLM-based debiased version if requested
+        if use_llm:
+            try:
+                llm = get_llm_service()
+                llm_debiased = llm.debias_self_help(prompt)
+                result['debiased_versions'].append(llm_debiased)
+            except Exception as e:
+                if 'llm_error' not in result:
+                    result['llm_error'] = str(e)
+        
+        # Generate and compare answers if requested
+        if generate_answers:
+            try:
+                llm = get_llm_service()
+                original_answer = llm.generate_answer(prompt)
+                
+                answers_comparison = {
+                    'original_prompt': prompt,
+                    'original_answer': original_answer,
+                    'modified_versions': []
+                }
+                
+                # Compare with first biased version if available
+                if result['biased_versions']:
+                    biased_prompt = result['biased_versions'][0].get('biased_prompt', '')
+                    if biased_prompt:
+                        biased_answer = llm.generate_answer(biased_prompt)
+                        answers_comparison['modified_versions'].append({
+                            'type': 'biased',
+                            'prompt': biased_prompt,
+                            'answer': biased_answer,
+                            'bias_type': result['biased_versions'][0].get('bias_added', 'Unknown')
+                        })
+                
+                # Compare with first debiased version if available
+                if result['debiased_versions']:
+                    debiased_prompt = result['debiased_versions'][0].get('debiased_prompt', '')
+                    if debiased_prompt:
+                        debiased_answer = llm.generate_answer(debiased_prompt)
+                        answers_comparison['modified_versions'].append({
+                            'type': 'debiased',
+                            'prompt': debiased_prompt,
+                            'answer': debiased_answer,
+                            'method': result['debiased_versions'][0].get('method', 'Unknown')
+                        })
+                
+                result['answers_comparison'] = answers_comparison
+            except Exception as e:
+                result['answers_error'] = str(e)
+        
+        return jsonify(result)
     
-    return jsonify(result)
+    except Exception as e:
+        print(f"Unexpected error in analyze_prompt: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 
 @app.route('/api/detect', methods=['POST'])
@@ -283,141 +435,265 @@ def llm_compare():
         return jsonify({'error': f'LLM comparison failed: {str(e)}'}), 500
 
 
+@app.route('/api/admin/usage', methods=['GET'])
+@admin_only
+def admin_usage():
+    """
+    Admin endpoint to monitor API usage and costs.
+    Requires admin API key.
+    """
+    if not usage_tracker:
+        return jsonify({'error': 'Usage tracking not available'}), 500
+
+    try:
+        # Get all API keys' stats
+        all_stats = []
+        for api_key in usage_tracker.usage.keys():
+            all_stats.append(usage_tracker.get_stats(api_key))
+
+        return jsonify({
+            'config': SecurityConfig.get_config_summary() if SecurityConfig else {},
+            'usage_by_key': all_stats,
+            'total_requests_today': sum(
+                stats['today']['count'] for stats in all_stats
+            ),
+            'total_cost_today': sum(
+                stats['today']['cost'] for stats in all_stats
+            ),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get usage stats: {str(e)}'}), 500
+
+
+@app.route('/api/admin/config', methods=['GET'])
+@admin_only
+def admin_config():
+    """
+    Admin endpoint to view security configuration.
+    Requires admin API key.
+    """
+    if not SecurityConfig:
+        return jsonify({'error': 'Security configuration not available'}), 500
+
+    return jsonify(SecurityConfig.get_config_summary())
+
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint (no auth required).
+    """
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'features': {
+            'hearts_available': HEARTS_AGGREGATOR_AVAILABLE,
+            'vertex_ai_available': VERTEX_LLM_AVAILABLE,
+            'security_enabled': SecurityConfig.REQUIRE_API_KEY if SecurityConfig else False
+        }
+    })
+
+
+@app.route('/api/models', methods=['GET'])
+@rate_limit('get_models', cost_estimate=0.0)  # Free endpoint, just rate limited
+def get_models():
+    """
+    Get list of available models for generation.
+
+    Returns:
+        JSON with generation and evaluation models
+    """
+    try:
+        from model_config import get_generation_models, get_evaluation_models
+    except ImportError:
+        try:
+            from .model_config import get_generation_models, get_evaluation_models
+        except ImportError:
+            return jsonify({'error': 'Model configuration not available'}), 500
+
+    try:
+        return jsonify({
+            'generation_models': get_generation_models(),
+            'evaluation_models': get_evaluation_models()
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get models: {str(e)}'}), 500
+
+
 @app.route('/api/graph/expand', methods=['POST'])
+@rate_limit('graph_expand', cost_estimate=0.02)  # ~$0.02 per initial graph, IP-based limits
 def graph_expand():
     """
-    Graph-based expansion endpoint for React frontend.
-    Creates a graph structure showing bias pathways from a starter prompt.
+    Initial graph expansion - creates the first node with evaluations and potential paths.
+
+    Returns:
+    - Single node with: prompt, LLM answer, HEARTS evaluation, Gemini evaluation
+    - Potential paths (edges without targets) for bias/debias options
+
+    Does NOT create child nodes - those are created when user clicks a path.
     """
-    data = request.get_json()
-    prompt = data.get('prompt', '')
-    node_id = data.get('node_id')  # If expanding from existing node
-    
-    if not prompt:
-        return jsonify({'error': 'No prompt provided'}), 400
-    
-    # Detect biases
-    detected_biases = bias_detector.detect_biases(prompt)
-    
-    # Generate nodes and edges for the graph
-    nodes = []
-    edges = []
-    
-    # Root node (original prompt)
-    root_id = node_id or str(uuid.uuid4())
-    nodes.append({
-        'id': root_id,
-        'label': prompt[:50] + '...' if len(prompt) > 50 else prompt,
-        'prompt': prompt,
-        'type': 'original',
-        'bias_score': detected_biases.get('overall_bias_score', 0),
-        'biases': detected_biases
-    })
-    
-    # Generate biased versions (rule-based)
-    biased_versions = bias_injector.inject_biases(prompt)
-    for i, biased in enumerate(biased_versions):
-        bias_id = str(uuid.uuid4())
-        nodes.append({
-            'id': bias_id,
-            'label': f"Biased: {biased.get('bias_added', 'Bias')}",
-            'prompt': biased.get('biased_prompt', ''),
-            'type': 'biased',
-            'bias_type': biased.get('bias_added', ''),
-            'explanation': biased.get('explanation', ''),
-            'how_it_works': biased.get('how_it_works', ''),
-            'source': 'Rule-based'
-        })
-        edges.append({
-            'id': f"{root_id}-{bias_id}",
-            'source': root_id,
-            'target': bias_id,
-            'type': 'bias',
-            'label': biased.get('bias_added', 'Bias')
-        })
-    
-    # Generate LLM-based biased versions if available
-    if VERTEX_LLM_AVAILABLE:
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+
+        prompt = data.get('prompt', '')
+        if not prompt:
+            return jsonify({'error': 'No prompt provided'}), 400
+
+        # Generate unique ID for this node
+        node_id = str(uuid.uuid4())
+
+        # Step 1: Generate LLM answer for the prompt
+        llm_answer = None
+        if VERTEX_LLM_AVAILABLE:
+            try:
+                llm = get_vertex_llm_service()
+                llm_answer = llm.generate_answer(prompt)
+                print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
+            except Exception as e:
+                print(f"Warning: Could not generate LLM answer: {e}")
+                llm_answer = f"[Error generating answer: {str(e)}]"
+        else:
+            llm_answer = "[LLM not available - configure Vertex AI]"
+
+        # Step 2: Multi-layer bias detection (HEARTS + Gemini)
+        use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
+        use_gemini = VERTEX_LLM_AVAILABLE
+
+        if use_hearts:
+            try:
+                detected_biases = bias_aggregator.detect_all_layers(
+                    prompt=prompt,
+                    use_hearts=True,
+                    use_gemini=use_gemini,  # Enable Gemini evaluation
+                    explain=True
+                )
+                print(f"✓ Multi-layer detection complete (HEARTS + Gemini)")
+            except Exception as e:
+                print(f"Warning: HEARTS detection failed: {e}")
+                # Fallback to rule-based
+                detected_biases = bias_detector.detect_biases(prompt)
+                use_hearts = False
+        else:
+            # Rule-based only
+            detected_biases = bias_detector.detect_biases(prompt)
+
+        # Step 3: Build node with structured evaluations
+        hearts_data = detected_biases.get('hearts', {}) if isinstance(detected_biases.get('hearts'), dict) else {}
+        gemini_data = detected_biases.get('gemini_validation', {}) if isinstance(detected_biases.get('gemini_validation'), dict) else {}
+        explanations = detected_biases.get('explanations', {}) if isinstance(detected_biases.get('explanations'), dict) else {}
+
+        # Safely extract token importance (ensure it's serializable)
+        token_importance = []
+        if use_hearts and explanations.get('most_biased_tokens'):
+            raw_tokens = explanations.get('most_biased_tokens', [])[:10]
+            for token in raw_tokens:
+                if isinstance(token, dict):
+                    token_importance.append({
+                        'token': str(token.get('token', '')),
+                        'importance': float(token.get('importance', 0)),
+                        'contribution': str(token.get('contribution', 'unknown')),
+                        'source': str(token.get('source', 'HEARTS-SHAP'))
+                    })
+
+        node = {
+            'id': node_id,
+            'prompt': prompt,
+            'llm_answer': llm_answer,
+            'type': 'original',
+
+            # HEARTS ML evaluation
+            'hearts_evaluation': {
+                'available': use_hearts,
+                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if use_hearts else None,
+                'confidence': float(hearts_data.get('confidence', 0)) if use_hearts else None,
+                'probabilities': dict(hearts_data.get('probabilities', {})) if use_hearts else {},
+                'prediction': str(hearts_data.get('prediction', 'Unknown')) if use_hearts else None,
+                'token_importance': token_importance,
+                'model': 'HEARTS ALBERT-v2' if use_hearts else None
+            },
+
+            # Gemini LLM evaluation
+            'gemini_evaluation': {
+                'available': bool(use_gemini and gemini_data),
+                'bias_score': float(gemini_data.get('evaluation', {}).get('bias_score', 0)) if gemini_data else None,
+                'severity': str(gemini_data.get('evaluation', {}).get('severity', 'unknown')) if gemini_data else None,
+                'bias_types': list(gemini_data.get('evaluation', {}).get('bias_types', [])) if gemini_data else [],
+                'explanation': str(gemini_data.get('evaluation', {}).get('explanation', '')) if gemini_data else None,
+                'recommendations': str(gemini_data.get('evaluation', {}).get('recommendations', '')) if gemini_data else None,
+                'model': 'Gemini 2.5 Flash' if gemini_data else None
+            },
+
+            # Overall metrics (ensemble)
+            'bias_score': float(detected_biases.get('overall_bias_score', 0)),
+            'confidence': float(detected_biases.get('confidence', 0)),
+            'source_agreement': float(detected_biases.get('source_agreement', 1.0)),
+
+            # Metadata
+            'detection_sources': list(detected_biases.get('detection_sources', ['Rule-based'])),
+            'layers_used': list(detected_biases.get('layers_used', ['rule-based'])),
+            'frameworks': list(explanations.get('frameworks', []))
+        }
+
+        # Step 4: Determine available bias/debias paths
+        # Import bias instructions
         try:
-            llm = get_vertex_llm_service()
-            llm_biased = llm.inject_bias_llm(prompt, "confirmation")
-            llm_bias_id = str(uuid.uuid4())
-            nodes.append({
-                'id': llm_bias_id,
-                'label': f"Biased (LLM): {llm_biased.get('bias_added', 'Bias')}",
-                'prompt': llm_biased.get('biased_prompt', ''),
-                'type': 'biased',
-                'bias_type': llm_biased.get('bias_added', ''),
-                'explanation': llm_biased.get('explanation', ''),
-                'source': 'Vertex AI (Llama 3.3)'
-            })
+            from bias_instructions import get_available_bias_types, get_available_debias_methods
+        except ImportError:
+            from .bias_instructions import get_available_bias_types, get_available_debias_methods
+
+        available_biases = get_available_bias_types(detected_biases)
+        available_debiases = get_available_debias_methods(detected_biases)
+
+        # Create potential path edges (NO target nodes yet)
+        edges = []
+
+        # Add bias paths
+        for bias_option in available_biases:
             edges.append({
-                'id': f"{root_id}-{llm_bias_id}",
-                'source': root_id,
-                'target': llm_bias_id,
+                'id': f"{node_id}-bias-{bias_option['bias_type']}",
+                'source': node_id,
+                # NO 'target' field = potential path, not actual edge
                 'type': 'bias',
-                'label': 'LLM Bias',
-                'highlight': False
+                'bias_type': bias_option['bias_type'],
+                'label': bias_option['label'],
+                'description': bias_option['description'],
+                'severity': bias_option.get('severity', 'medium'),
+                'action_required': 'click_to_generate'
             })
-        except Exception as e:
-            print(f"LLM bias injection error: {e}")
-    
-    # Generate debiased versions (rule-based)
-    debiased_versions = debiaser.get_all_debiasing_methods(prompt)
-    for i, debiased in enumerate(debiased_versions):
-        debias_id = str(uuid.uuid4())
-        nodes.append({
-            'id': debias_id,
-            'label': f"Debiased: {debiased.get('method', 'Debias')}",
-            'prompt': debiased.get('debiased_prompt', ''),
-            'type': 'debiased',
-            'method': debiased.get('method', ''),
-            'explanation': debiased.get('explanation', ''),
-            'how_it_works': debiased.get('how_it_works', ''),
-            'framework': debiased.get('framework', ''),
-            'source': 'Rule-based'
-        })
-        edges.append({
-            'id': f"{root_id}-{debias_id}",
-            'source': root_id,
-            'target': debias_id,
-            'type': 'debias',
-            'label': debiased.get('method', 'Debias'),
-            'highlight': True  # Always highlight debias edges
-        })
-    
-    # Generate LLM-based debiased version if available
-    if VERTEX_LLM_AVAILABLE:
-        try:
-            llm = get_vertex_llm_service()
-            llm_debiased = llm.debias_self_help(prompt)
-            llm_debias_id = str(uuid.uuid4())
-            nodes.append({
-                'id': llm_debias_id,
-                'label': f"Debiased (LLM): {llm_debiased.get('method', 'Debias')}",
-                'prompt': llm_debiased.get('debiased_prompt', ''),
-                'type': 'debiased',
-                'method': llm_debiased.get('method', ''),
-                'explanation': llm_debiased.get('explanation', ''),
-                'framework': llm_debiased.get('framework', ''),
-                'source': 'Vertex AI (Llama 3.3)'
-            })
+
+        # Add debias paths
+        for debias_option in available_debiases:
             edges.append({
-                'id': f"{root_id}-{llm_debias_id}",
-                'source': root_id,
-                'target': llm_debias_id,
+                'id': f"{node_id}-debias-{debias_option['method']}",
+                'source': node_id,
+                # NO 'target' field = potential path, not actual edge
                 'type': 'debias',
-                'label': 'LLM Debias',
-                'highlight': True
+                'method': debias_option['method'],
+                'label': debias_option['label'],
+                'description': debias_option['description'],
+                'effectiveness': debias_option.get('effectiveness', 'high'),
+                'action_required': 'click_to_generate'
             })
-        except Exception as e:
-            print(f"LLM debiasing error: {e}")
-    
-    return jsonify({
-        'nodes': nodes,
-        'edges': edges,
-        'root_id': root_id
-    })
+
+        print(f"✓ Created node with {len(edges)} potential paths ({len(available_biases)} bias, {len(available_debiases)} debias)")
+
+        # Sanitize entire response to ensure JSON serializability
+        response = sanitize_for_json({
+            'nodes': [node],  # Only 1 node
+            'edges': edges,    # Potential paths (no targets)
+            'root_id': node_id
+        })
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"Error in graph_expand: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Graph expansion failed: {str(e)}'}), 500
 
 
 @app.route('/api/graph/evaluate', methods=['POST'])
@@ -449,115 +725,268 @@ def graph_evaluate():
 
 
 @app.route('/api/graph/expand-node', methods=['POST'])
+@rate_limit('graph_expand_node', cost_estimate=0.01)  # ~$0.01 per node expansion, IP-based limits
 def graph_expand_node():
     """
-    Expand a specific node in the graph (further bias or debias).
+    Expand a node - creates new child node when user clicks a potential path.
+
+    Process:
+    1. Transform prompt using LLM (bias or debias)
+    2. Generate LLM answer for new prompt
+    3. Evaluate new prompt with HEARTS
+    4. Evaluate new prompt with Gemini
+    5. Determine new potential paths
+    6. Return new node + connecting edge + new potential paths
     """
-    data = request.get_json()
-    node_id = data.get('node_id', '')
-    prompt = data.get('prompt', '')
-    action = data.get('action', 'debias')  # 'bias' or 'debias'
-    bias_type = data.get('bias_type', 'confirmation')
-    
-    if not prompt or not node_id:
-        return jsonify({'error': 'Missing node_id or prompt'}), 400
-    
-    nodes = []
-    edges = []
-    
-    if action == 'debias':
-        # Generate debiased version
-        if VERTEX_LLM_AVAILABLE:
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+
+        parent_id = data.get('node_id', '')
+        parent_prompt = data.get('prompt', '')
+        action = data.get('action', 'debias')  # 'bias' or 'debias'
+        bias_type = data.get('bias_type')  # For bias actions
+        debias_method = data.get('method')  # For debias actions
+        model_id = data.get('model_id')  # Optional model ID
+
+        if not parent_prompt or not parent_id:
+            return jsonify({'error': 'Missing node_id or prompt'}), 400
+
+        if not VERTEX_LLM_AVAILABLE:
+            return jsonify({'error': 'Vertex AI not available. Configure Google Cloud.'}), 503
+
+        llm = get_vertex_llm_service()
+
+        # Step 1: Transform prompt using LLM with instructions
+        if action == 'bias':
+            if not bias_type:
+                return jsonify({'error': 'Missing bias_type for bias action'}), 400
+
+            print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
+            transformation = llm.inject_bias_llm(parent_prompt, bias_type, model_id=model_id)
+            new_prompt = transformation['biased_prompt']
+            transformation_label = transformation['bias_added']
+            node_type = 'biased'
+
+        else:  # action == 'debias'
+            if not debias_method:
+                debias_method = 'auto'  # Auto-detect method
+
+            print(f"Debiasing prompt with method: {debias_method}{' using ' + model_id if model_id else ''}...")
+            transformation = llm.debias_self_help(parent_prompt, method=debias_method, model_id=model_id)
+            new_prompt = transformation['debiased_prompt']
+            transformation_label = transformation['method']
+            node_type = 'debiased'
+
+        print(f"✓ Transformed prompt ({len(new_prompt)} chars)")
+
+        # Step 2: Generate LLM answer for the NEW prompt
+        try:
+            llm_answer = llm.generate_answer(new_prompt)
+            print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
+        except Exception as e:
+            print(f"Warning: Could not generate LLM answer: {e}")
+            llm_answer = f"[Error generating answer: {str(e)}]"
+
+        # Step 3 & 4: Evaluate with HEARTS + Gemini
+        use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
+
+        if use_hearts:
             try:
-                llm = get_vertex_llm_service()
-                debiased = llm.debias_self_help(prompt)
-                new_id = str(uuid.uuid4())
-                nodes.append({
-                    'id': new_id,
-                    'label': f"Debiased: {debiased.get('method', 'Debias')}",
-                    'prompt': debiased.get('debiased_prompt', ''),
-                    'type': 'debiased',
-                    'method': debiased.get('method', ''),
-                    'source': 'Vertex AI (Llama 3.3)'
-                })
-                edges.append({
-                    'id': f"{node_id}-{new_id}",
-                    'source': node_id,
-                    'target': new_id,
-                    'type': 'debias',
-                    'highlight': True
-                })
+                detected_biases = bias_aggregator.detect_all_layers(
+                    prompt=new_prompt,
+                    use_hearts=True,
+                    use_gemini=True,  # Enable Gemini
+                    explain=True
+                )
+                print(f"✓ Multi-layer evaluation complete")
             except Exception as e:
-                return jsonify({'error': str(e)}), 500
+                print(f"Warning: Multi-layer evaluation failed: {e}")
+                detected_biases = bias_detector.detect_biases(new_prompt)
+                use_hearts = False
         else:
-            # Fallback to rule-based
-            debiased = debiaser.debias_prompt(prompt, 'comprehensive')
-            new_id = str(uuid.uuid4())
-            nodes.append({
-                'id': new_id,
-                'label': f"Debiased: {debiased.get('method', 'Debias')}",
-                'prompt': debiased.get('debiased_prompt', ''),
-                'type': 'debiased',
-                'method': debiased.get('method', ''),
-                'source': 'Rule-based'
+            detected_biases = bias_detector.detect_biases(new_prompt)
+
+        # Build new node with structured evaluations
+        new_id = str(uuid.uuid4())
+        hearts_data = detected_biases.get('hearts', {}) if isinstance(detected_biases.get('hearts'), dict) else {}
+        gemini_data = detected_biases.get('gemini_validation', {}) if isinstance(detected_biases.get('gemini_validation'), dict) else {}
+        explanations = detected_biases.get('explanations', {}) if isinstance(detected_biases.get('explanations'), dict) else {}
+
+        # Safely extract token importance
+        token_importance = []
+        if use_hearts and explanations.get('most_biased_tokens'):
+            raw_tokens = explanations.get('most_biased_tokens', [])[:10]
+            for token in raw_tokens:
+                if isinstance(token, dict):
+                    token_importance.append({
+                        'token': str(token.get('token', '')),
+                        'importance': float(token.get('importance', 0)),
+                        'contribution': str(token.get('contribution', 'unknown')),
+                        'source': str(token.get('source', 'HEARTS-SHAP'))
+                    })
+
+        new_node = {
+            'id': new_id,
+            'prompt': new_prompt,
+            'llm_answer': llm_answer,
+            'type': node_type,
+            'parent_id': parent_id,
+            'transformation': transformation_label,
+            'transformation_details': {
+                'action': str(action),
+                'bias_type': str(bias_type) if action == 'bias' and bias_type else None,
+                'method': str(debias_method) if action == 'debias' and debias_method else None,
+                'explanation': str(transformation.get('explanation', '')),
+                'framework': str(transformation.get('framework', ''))
+            },
+
+            # HEARTS ML evaluation
+            'hearts_evaluation': {
+                'available': use_hearts,
+                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if use_hearts else None,
+                'confidence': float(hearts_data.get('confidence', 0)) if use_hearts else None,
+                'probabilities': dict(hearts_data.get('probabilities', {})) if use_hearts else {},
+                'prediction': str(hearts_data.get('prediction', 'Unknown')) if use_hearts else None,
+                'token_importance': token_importance,
+                'model': 'HEARTS ALBERT-v2' if use_hearts else None
+            },
+
+            # Gemini LLM evaluation
+            'gemini_evaluation': {
+                'available': bool(gemini_data),
+                'bias_score': float(gemini_data.get('evaluation', {}).get('bias_score', 0)) if gemini_data else None,
+                'severity': str(gemini_data.get('evaluation', {}).get('severity', 'unknown')) if gemini_data else None,
+                'bias_types': list(gemini_data.get('evaluation', {}).get('bias_types', [])) if gemini_data else [],
+                'explanation': str(gemini_data.get('evaluation', {}).get('explanation', '')) if gemini_data else None,
+                'recommendations': str(gemini_data.get('evaluation', {}).get('recommendations', '')) if gemini_data else None,
+                'model': 'Gemini 2.5 Flash' if gemini_data else None
+            },
+
+            # Overall metrics
+            'bias_score': float(detected_biases.get('overall_bias_score', 0)),
+            'confidence': float(detected_biases.get('confidence', 0)),
+            'source_agreement': float(detected_biases.get('source_agreement', 1.0)),
+
+            # Metadata
+            'detection_sources': list(detected_biases.get('detection_sources', ['Rule-based'])),
+            'layers_used': list(detected_biases.get('layers_used', ['rule-based'])),
+            'frameworks': list(explanations.get('frameworks', []))
+        }
+
+        # Step 5: Create connecting edge
+        connecting_edge = {
+            'id': f"{parent_id}-{new_id}",
+            'source': parent_id,
+            'target': new_id,  # This edge HAS a target
+            'type': action,
+            'label': transformation_label,
+            'transformation': action
+        }
+
+        # Step 6: Determine new potential paths from this node
+        try:
+            from bias_instructions import get_available_bias_types, get_available_debias_methods
+        except ImportError:
+            from .bias_instructions import get_available_bias_types, get_available_debias_methods
+
+        available_biases = get_available_bias_types(detected_biases)
+        available_debiases = get_available_debias_methods(detected_biases)
+
+        # Create potential paths from new node (NO targets)
+        potential_paths = []
+
+        # Add bias paths
+        for bias_option in available_biases:
+            potential_paths.append({
+                'id': f"{new_id}-bias-{bias_option['bias_type']}",
+                'source': new_id,
+                # NO 'target' field = potential path
+                'type': 'bias',
+                'bias_type': bias_option['bias_type'],
+                'label': bias_option['label'],
+                'description': bias_option['description'],
+                'severity': bias_option.get('severity', 'medium'),
+                'action_required': 'click_to_generate'
             })
-            edges.append({
-                'id': f"{node_id}-{new_id}",
-                'source': node_id,
-                'target': new_id,
+
+        # Add debias paths
+        for debias_option in available_debiases:
+            potential_paths.append({
+                'id': f"{new_id}-debias-{debias_option['method']}",
+                'source': new_id,
+                # NO 'target' field = potential path
                 'type': 'debias',
-                'highlight': True
+                'method': debias_option['method'],
+                'label': debias_option['label'],
+                'description': debias_option['description'],
+                'effectiveness': debias_option.get('effectiveness', 'high'),
+                'action_required': 'click_to_generate'
             })
-    else:  # bias
-        # Generate biased version
-        if VERTEX_LLM_AVAILABLE:
-            try:
-                llm = get_vertex_llm_service()
-                biased = llm.inject_bias_llm(prompt, bias_type)
-                new_id = str(uuid.uuid4())
-                nodes.append({
-                    'id': new_id,
-                    'label': f"Biased: {biased.get('bias_added', 'Bias')}",
-                    'prompt': biased.get('biased_prompt', ''),
-                    'type': 'biased',
-                    'bias_type': biased.get('bias_added', ''),
-                    'source': 'Vertex AI (Llama 3.3)'
-                })
-                edges.append({
-                    'id': f"{node_id}-{new_id}",
-                    'source': node_id,
-                    'target': new_id,
-                    'type': 'bias',
-                    'highlight': False
-                })
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        else:
-            # Fallback to rule-based
-            biased_versions = bias_injector.inject_biases(prompt)
-            if biased_versions:
-                biased = biased_versions[0]
-                new_id = str(uuid.uuid4())
-                nodes.append({
-                    'id': new_id,
-                    'label': f"Biased: {biased.get('bias_added', 'Bias')}",
-                    'prompt': biased.get('biased_prompt', ''),
-                    'type': 'biased',
-                    'bias_type': biased.get('bias_added', ''),
-                    'source': 'Rule-based'
-                })
-                edges.append({
-                    'id': f"{node_id}-{new_id}",
-                    'source': node_id,
-                    'target': new_id,
-                    'type': 'bias',
-                    'highlight': False
-                })
-    
-    return jsonify({
-        'nodes': nodes,
-        'edges': edges
-    })
+
+        print(f"✓ Created node with {len(potential_paths)} new potential paths")
+
+        # Sanitize entire response to ensure JSON serializability
+        response = sanitize_for_json({
+            'nodes': [new_node],
+            'edges': [connecting_edge] + potential_paths,  # 1 real edge + potential paths
+            'new_node_id': new_id
+        })
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"Error in graph_expand_node: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Node expansion failed: {str(e)}'}), 500
+
+
+@app.route('/api/explain', methods=['POST'])
+def explain_bias():
+    """
+    Get detailed SHAP explanations for a prompt using HEARTS.
+
+    Requires HEARTS model to be available.
+    Returns token-level importance scores and visualization data.
+    """
+    if not HEARTS_AGGREGATOR_AVAILABLE or not bias_aggregator:
+        return jsonify({
+            'error': 'HEARTS not available. Install: pip install transformers torch shap lime'
+        }), 503
+
+    data = request.get_json()
+    prompt = data.get('prompt', '')
+
+    if not prompt:
+        return jsonify({'error': 'No prompt provided'}), 400
+
+    try:
+        # Get detailed explanation
+        result = bias_aggregator.detect_all_layers(
+            prompt=prompt,
+            use_hearts=True,
+            use_gemini=False,
+            explain=True
+        )
+
+        # Extract explanation data
+        explanations = result.get('explanations', {})
+        hearts_data = result.get('hearts', {})
+
+        return jsonify({
+            'prompt': prompt,
+            'is_stereotype': hearts_data.get('is_stereotype', False),
+            'confidence': hearts_data.get('confidence', 0),
+            'probabilities': hearts_data.get('probabilities', {}),
+            'token_importance': explanations.get('most_biased_tokens', []),
+            'frameworks': explanations.get('frameworks', []),
+            'detected_bias_types': explanations.get('detected_bias_types', []),
+            'model': 'HEARTS ALBERT-v2'
+        })
+    except Exception as e:
+        return jsonify({'error': f'Explanation failed: {str(e)}'}), 500
 
 
 @app.route('/', methods=['GET'])
@@ -565,12 +994,21 @@ def root():
     """Root endpoint with API information"""
     return jsonify({
         'message': 'Bias Analysis API',
-        'version': '2.0',
+        'version': '2.1',
         'vertex_llm_available': VERTEX_LLM_AVAILABLE,
+        'hearts_available': HEARTS_AGGREGATOR_AVAILABLE,
+        'features': {
+            'rule_based_detection': True,
+            'ml_stereotype_detection': HEARTS_AGGREGATOR_AVAILABLE,
+            'shap_explanations': HEARTS_AGGREGATOR_AVAILABLE,
+            'llm_generation': VERTEX_LLM_AVAILABLE,
+            'llm_evaluation': VERTEX_LLM_AVAILABLE
+        },
         'endpoints': {
-            'POST /api/graph/expand': 'Expand graph from starter prompt',
+            'POST /api/graph/expand': 'Expand graph from starter prompt (multi-layer detection)',
             'POST /api/graph/evaluate': 'Evaluate bias using Gemini 2.5 Flash',
             'POST /api/graph/expand-node': 'Expand specific node (bias/debias)',
+            'POST /api/explain': 'Get SHAP token-level explanations (HEARTS)',
             'POST /api/analyze': 'Full analysis (legacy)',
             'GET /api/health': 'Health check'
         }
@@ -587,12 +1025,19 @@ if __name__ == '__main__':
     print(f"Environment: {env}")
     print(f"Debug mode: {debug}")
     print("\nAPI endpoints:")
-    print("  POST /api/graph/expand - Expand graph from starter prompt")
+    print("  POST /api/graph/expand - Expand graph from starter prompt (multi-layer)")
     print("  POST /api/graph/evaluate - Evaluate bias using Gemini 2.5 Flash")
     print("  POST /api/graph/expand-node - Expand specific node")
+    print("  POST /api/explain - Get SHAP explanations (HEARTS)")
     print("  GET  /api/health - Health check")
     print(f"\nServer running on port {port}")
-    print(f"Vertex AI available: {VERTEX_LLM_AVAILABLE}")
+    print(f"\nFeatures:")
+    print(f"  Vertex AI (Llama + Gemini): {VERTEX_LLM_AVAILABLE}")
+    print(f"  HEARTS ML Detection: {HEARTS_AGGREGATOR_AVAILABLE}")
+    if HEARTS_AGGREGATOR_AVAILABLE:
+        print(f"  - ALBERT-v2 stereotype detection")
+        print(f"  - SHAP token-level explanations")
+        print(f"  - Multi-layer ensemble scoring")
     
     app.run(debug=debug, host='0.0.0.0', port=port)
 

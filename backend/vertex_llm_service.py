@@ -160,38 +160,74 @@ class VertexLLMService:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = 1000,
+        model_override: Optional[str] = None
     ) -> str:
         """
-        Generate text using Llama 3.3 via REST API.
-        
+        Generate text using specified model (default: Llama 3.3).
+        Supports both OpenAPI endpoint models and Vertex AI SDK models.
+
         Args:
             prompt: User prompt
             system_prompt: Optional system prompt
             temperature: Sampling temperature (0-1)
             max_tokens: Maximum tokens to generate
-            
+            model_override: Optional model ID to use instead of default
+
         Returns:
             Generated text
         """
+        # Import model config
+        try:
+            from model_config import get_model_info, is_valid_model
+        except ImportError:
+            from .model_config import get_model_info, is_valid_model
+
+        # Determine which model to use
+        model_id = model_override or self.llama_model_name
+
+        # Validate model
+        if not is_valid_model(model_id):
+            raise ValueError(f"Invalid model ID: {model_id}")
+
+        model_info = get_model_info(model_id)
+        endpoint_type = model_info.get('endpoint_type', 'openapi')
+
+        # Route to appropriate generation method
+        if endpoint_type == 'openapi':
+            return self._generate_openapi(model_id, prompt, system_prompt, temperature, max_tokens)
+        elif endpoint_type == 'vertex_sdk':
+            return self._generate_vertex_sdk(model_id, prompt, system_prompt, temperature, max_tokens)
+        else:
+            raise ValueError(f"Unsupported endpoint type: {endpoint_type}")
+
+    def _generate_openapi(
+        self,
+        model_id: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int
+    ) -> str:
+        """Generate using OpenAPI endpoint (for Llama models)."""
         # Build messages array
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
+
         # Prepare request payload
         payload = {
-            "model": self.llama_model_name,
+            "model": model_id,
             "stream": False,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens
         }
-        
+
         # Get access token
         access_token = self._get_access_token()
-        
+
         # Make API request
         try:
             response = requests.post(
@@ -204,10 +240,10 @@ class VertexLLMService:
                 timeout=60
             )
             response.raise_for_status()
-            
+
             # Parse response
             result = response.json()
-            
+
             # Extract content from response
             # Response format: {"choices": [{"message": {"content": "..."}}]}
             if "choices" in result and len(result["choices"]) > 0:
@@ -215,71 +251,344 @@ class VertexLLMService:
                 return content.strip()
             else:
                 raise Exception(f"Unexpected response format: {result}")
-                
+
         except requests.exceptions.RequestException as e:
-            raise Exception(f"Llama 3.3 API request failed: {str(e)}")
+            raise Exception(f"OpenAPI request failed for {model_id}: {str(e)}")
         except Exception as e:
             raise Exception(f"Error generating text: {str(e)}")
+
+    def _generate_vertex_sdk(
+        self,
+        model_id: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int
+    ) -> str:
+        """Generate using Vertex AI SDK (for Claude, Mistral, Gemini models)."""
+        if not VERTEX_AI_SDK_AVAILABLE:
+            raise Exception("Vertex AI SDK not available. Install with: pip install google-cloud-aiplatform")
+
+        try:
+            # Initialize model
+            if not hasattr(vertexai, '_initialized') or not vertexai._initialized:
+                vertexai.init(project=self.project_id, location=self.location)
+                vertexai._initialized = True
+
+            # Determine model path
+            if 'mistral' in model_id:
+                model_path = f"publishers/mistralai/models/{model_id}"
+            elif 'gemini' in model_id:
+                model_path = f"publishers/google/models/{model_id}"
+            else:
+                model_path = model_id
+
+            model = GenerativeModel(model_path)
+
+            # Build prompt with system instructions if provided
+            full_prompt = prompt
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+
+            # Generate content
+            response = model.generate_content(
+                full_prompt,
+                generation_config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens,
+                }
+            )
+
+            return response.text.strip()
+
+        except Exception as e:
+            raise Exception(f"Vertex SDK generation failed for {model_id}: {str(e)}")
     
-    def inject_bias_llm(self, prompt: str, bias_type: str) -> Dict[str, Any]:
+    def inject_bias_llm(self, prompt: str, bias_type: str, model_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Use Llama 3.3 to inject bias into a prompt.
-        
+        Use LLM to inject bias into a prompt using instruction-based approach.
+
         Args:
             prompt: Original prompt
-            bias_type: Type of bias to inject
-            
+            bias_type: Type of bias to inject (e.g., 'confirmation_bias', 'anchoring_bias')
+            model_id: Optional model ID to use (default: Llama 3.3)
+
         Returns:
-            Dictionary with biased prompt and explanation
+            Dictionary with biased prompt and metadata
         """
-        system_prompt = f"""You are an expert in cognitive bias and language analysis. 
-Your task is to modify a user's prompt to introduce {bias_type} bias, while keeping the core question intact.
-Make the modification subtle but effective - the bias should influence how an LLM would respond.
+        # Import here to avoid circular dependencies
+        try:
+            from bias_instructions import get_bias_instruction, BIAS_INSTRUCTIONS
+        except ImportError:
+            try:
+                from .bias_instructions import get_bias_instruction, BIAS_INSTRUCTIONS
+            except ImportError:
+                # Fallback to simple approach if instructions not available
+                return self._inject_bias_simple(prompt, bias_type, model_id)
+
+        # Get instruction guide
+        instruction = get_bias_instruction(bias_type)
+        if not instruction:
+            raise ValueError(f"Unknown bias type: {bias_type}. Available types: {list(BIAS_INSTRUCTIONS.keys())}")
+
+        # Build comprehensive system prompt with instructions
+        examples_text = "\n\n".join([
+            f"Example {i+1}:\nOriginal: {ex['original']}\nBiased: {ex['biased']}"
+            for i, ex in enumerate(instruction['examples'])
+        ])
+
+        techniques_text = "\n".join([f"  • {technique}" for technique in instruction['techniques']])
+
+        system_prompt = f"""You are an expert in bias analysis and prompt engineering.
+
+Your task is to modify a prompt to introduce {instruction['name']}.
+
+DESCRIPTION:
+{instruction['description']}
+
+TECHNIQUES TO USE:
+{techniques_text}
+
+EXAMPLES:
+{examples_text}
+
+RESEARCH FRAMEWORK:
+{instruction['framework']}
+
+CRITICAL REQUIREMENTS:
+1. Make the biased version sound NATURAL and grammatically correct
+2. Don't use obvious templates - be creative and subtle
+3. The bias should be effective but not crude or forced
+4. Preserve the core intent and question while introducing the bias
+5. Maintain fluency - it should read like a naturally written prompt
+6. Return ONLY the biased prompt - no explanation, no preamble, no extra text
+
+Your response must be ONLY the biased prompt."""
+
+        user_prompt = f"Original prompt: {prompt}\n\nCreate a naturally biased version with {instruction['name']}:"
+
+        try:
+            biased_prompt = self.generate(
+                user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.8,  # Higher for creativity
+                max_tokens=500,
+                model_override=model_id
+            )
+
+            # Clean up the response (remove any explanation if LLM added it)
+            biased_prompt = biased_prompt.strip()
+
+            # Remove common prefixes if LLM added them
+            for prefix in ["Biased prompt:", "Biased version:", "Here is", "Here's"]:
+                if biased_prompt.lower().startswith(prefix.lower()):
+                    biased_prompt = biased_prompt[len(prefix):].strip().lstrip(':').strip()
+
+            # Get model name for display
+            try:
+                from model_config import get_model_info
+                model_info = get_model_info(model_id or self.llama_model_name)
+                model_display = model_info['name'] if model_info else (model_id or 'Llama 3.3')
+            except:
+                model_display = model_id or 'Llama 3.3'
+
+            return {
+                'biased_prompt': biased_prompt,
+                'bias_added': instruction['name'],
+                'bias_type': bias_type,
+                'explanation': instruction['description'],
+                'framework': instruction['framework'],
+                'severity': instruction.get('severity', 'medium'),
+                'source': f'LLM-based ({model_display})',
+                'model_id': model_id or self.llama_model_name,
+                'instruction_based': True
+            }
+
+        except Exception as e:
+            raise Exception(f"Bias injection failed: {str(e)}")
+
+    def _inject_bias_simple(self, prompt: str, bias_type: str, model_id: Optional[str] = None) -> Dict[str, Any]:
+        """Fallback simple bias injection if instructions not available"""
+        system_prompt = f"""You are an expert in cognitive bias and language analysis.
+Your task is to modify a user's prompt to introduce {bias_type}, while keeping the core question intact.
+Make the modification subtle but effective.
 Return only the modified prompt, without explanation."""
-        
+
         biased_prompt = self.generate(
-            f"Original prompt: {prompt}\n\nCreate a biased version that introduces {bias_type} bias:",
+            f"Original prompt: {prompt}\n\nCreate a biased version that introduces {bias_type}:",
             system_prompt=system_prompt,
-            temperature=0.8
+            temperature=0.8,
+            model_override=model_id
         )
-        
+
+        # Get model name for display
+        try:
+            from model_config import get_model_info
+            model_info = get_model_info(model_id or self.llama_model_name)
+            model_display = model_info['name'] if model_info else (model_id or 'Llama 3.3')
+        except:
+            model_display = model_id or 'Llama 3.3'
+
         return {
-            'type': f'{bias_type}_bias_llm',
-            'biased_prompt': biased_prompt,
-            'bias_added': f'{bias_type.capitalize()} Bias (LLM-generated)',
-            'explanation': f'Llama 3.3-generated version introducing {bias_type} bias.',
-            'how_it_works': f'Llama 3.3 analyzed the original prompt and generated a version that introduces {bias_type} bias.',
-            'source': 'Vertex AI (Llama 3.3)'
+            'biased_prompt': biased_prompt.strip(),
+            'bias_added': f'{bias_type.replace("_", " ").title()}',
+            'bias_type': bias_type,
+            'explanation': f'LLM-generated version introducing {bias_type}.',
+            'source': f'Vertex AI ({model_display})',
+            'model_id': model_id or self.llama_model_name,
+            'instruction_based': False
         }
     
-    def debias_self_help(self, prompt: str) -> Dict[str, Any]:
+    def debias_self_help(self, prompt: str, method: str = 'auto', model_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Use Llama 3.3 for self-help debiasing (BiasBuster method).
-        
+        Use LLM for debiasing using instruction-based approach.
+
         Args:
             prompt: Potentially biased prompt
-            
+            method: Debiasing method or 'auto' to auto-detect (default: 'auto')
+            model_id: Optional model ID to use (default: Llama 3.3)
+
         Returns:
-            Dictionary with debiased prompt and explanation
+            Dictionary with debiased prompt and metadata
         """
-        system_prompt = """You are an expert in fair and unbiased communication. 
+        # Import here to avoid circular dependencies
+        try:
+            from bias_instructions import get_debias_instruction, get_available_debias_methods
+            from bias_detection import BiasDetector
+        except ImportError:
+            try:
+                from .bias_instructions import get_debias_instruction, get_available_debias_methods
+                from .bias_detection import BiasDetector
+            except ImportError:
+                # Fallback to simple approach
+                return self._debias_simple(prompt, model_id)
+
+        # Auto-detect method if needed
+        if method == 'auto':
+            try:
+                detector = BiasDetector()
+                detected = detector.detect_biases(prompt)
+                methods = get_available_debias_methods(detected)
+                method = methods[0]['method'] if methods else 'neutralize_language'
+            except Exception:
+                method = 'comprehensive'  # Default to comprehensive
+
+        # Get instruction guide
+        instruction = get_debias_instruction(method)
+        if not instruction:
+            # Fallback to comprehensive if method not found
+            instruction = get_debias_instruction('comprehensive')
+            if not instruction:
+                return self._debias_simple(prompt, model_id)
+
+        # Build comprehensive system prompt with instructions
+        examples_text = "\n\n".join([
+            f"Example {i+1}:\nBiased: {ex['biased']}\nDebiased: {ex['debiased']}"
+            for i, ex in enumerate(instruction['examples'])
+        ])
+
+        techniques_text = "\n".join([f"  • {technique}" for technique in instruction['techniques']])
+
+        system_prompt = f"""You are an expert in fair and unbiased communication.
+
+Your task is to remove bias from a prompt using the {instruction['name']} approach.
+
+DESCRIPTION:
+{instruction['description']}
+
+TECHNIQUES TO USE:
+{techniques_text}
+
+EXAMPLES:
+{examples_text}
+
+RESEARCH FRAMEWORK:
+{instruction['framework']}
+
+CRITICAL REQUIREMENTS:
+1. Make the debiased version sound natural and fluent
+2. Preserve the core question and intent
+3. Remove ALL bias indicators identified in the techniques
+4. Keep the prompt clear, concise, and useful
+5. Maintain grammatical correctness
+6. Return ONLY the debiased prompt - no explanation, no preamble
+
+Your response must be ONLY the debiased prompt."""
+
+        user_prompt = f"Biased prompt: {prompt}\n\nCreate a debiased version using {instruction['name']}:"
+
+        try:
+            debiased_prompt = self.generate(
+                user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.3,  # Lower for consistency
+                max_tokens=500,
+                model_override=model_id
+            )
+
+            # Clean up the response
+            debiased_prompt = debiased_prompt.strip()
+
+            # Remove common prefixes if LLM added them
+            for prefix in ["Debiased prompt:", "Debiased version:", "Here is", "Here's", "Neutral prompt:"]:
+                if debiased_prompt.lower().startswith(prefix.lower()):
+                    debiased_prompt = debiased_prompt[len(prefix):].strip().lstrip(':').strip()
+
+            # Get model name for display
+            try:
+                from model_config import get_model_info
+                model_info = get_model_info(model_id or self.llama_model_name)
+                model_display = model_info['name'] if model_info else (model_id or 'Llama 3.3')
+            except:
+                model_display = model_id or 'Llama 3.3'
+
+            return {
+                'debiased_prompt': debiased_prompt,
+                'method': instruction['name'],
+                'debias_method': method,
+                'explanation': instruction['description'],
+                'framework': instruction['framework'],
+                'effectiveness': instruction.get('effectiveness', 'high'),
+                'source': f'LLM-based ({model_display})',
+                'model_id': model_id or self.llama_model_name,
+                'instruction_based': True
+            }
+
+        except Exception as e:
+            raise Exception(f"Debiasing failed: {str(e)}")
+
+    def _debias_simple(self, prompt: str, model_id: Optional[str] = None) -> Dict[str, Any]:
+        """Fallback simple debiasing if instructions not available"""
+        system_prompt = """You are an expert in fair and unbiased communication.
 Your task is to rewrite a user's prompt to remove any potential biases while preserving the core question.
 Remove leading questions, stereotypes, assumptions, and any language that might introduce bias.
-Make the prompt neutral, fair, and clear."""
-        
+Make the prompt neutral, fair, and clear.
+Return only the debiased prompt, without explanation."""
+
         debiased_prompt = self.generate(
             f"Rewrite this prompt to be neutral and unbiased:\n\n{prompt}",
             system_prompt=system_prompt,
-            temperature=0.3
+            temperature=0.3,
+            model_override=model_id
         )
-        
+
+        # Get model name for display
+        try:
+            from model_config import get_model_info
+            model_info = get_model_info(model_id or self.llama_model_name)
+            model_display = model_info['name'] if model_info else (model_id or 'Llama 3.3')
+        except:
+            model_display = model_id or 'Llama 3.3'
+
         return {
-            'method': 'Self-Help Debiasing (LLM)',
-            'debiased_prompt': debiased_prompt,
-            'explanation': 'Llama 3.3-based self-help debiasing (BiasBuster method).',
-            'how_it_works': 'Llama 3.3 analyzes the prompt and rewrites it to be neutral and unbiased.',
+            'debiased_prompt': debiased_prompt.strip(),
+            'method': 'General Debiasing',
+            'debias_method': 'comprehensive',
+            'explanation': 'LLM-based debiasing to remove bias and make prompt neutral.',
             'framework': 'BiasBuster (Echterhoff et al., 2024)',
-            'source': 'Vertex AI (Llama 3.3)'
+            'source': f'Vertex AI ({model_display})',
+            'model_id': model_id or self.llama_model_name,
+            'instruction_based': False
         }
     
     def evaluate_bias(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
