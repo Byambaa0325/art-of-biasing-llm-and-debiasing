@@ -22,8 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY frontend-react/package.json ./frontend-react/
 WORKDIR /app/frontend-react
 # Install all dependencies (including dev dependencies needed for build)
-# Use npm install to handle lock file mismatches (will update lock file if needed)
-RUN npm install --legacy-peer-deps && npm cache clean --force
+# Delete package-lock.json if exists and do fresh install to avoid conflicts
+RUN rm -f package-lock.json && \
+    npm install && \
+    npm cache clean --force
 WORKDIR /app
 
 # Copy frontend source and build
@@ -39,21 +41,8 @@ WORKDIR /app
 # Pre-download HEARTS model during build (bakes into image)
 # This prevents downloading on every Cloud Run cold start
 RUN mkdir -p /app/.cache/huggingface && \
-    python -c "\
-import os; \
-os.environ['TRANSFORMERS_CACHE'] = '/app/.cache/huggingface'; \
-try: \
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
-    print('Downloading HEARTS model...'); \
-    tokenizer = AutoTokenizer.from_pretrained('holistic-ai/bias_classifier_albertv2'); \
-    model = AutoModelForSequenceClassification.from_pretrained('holistic-ai/bias_classifier_albertv2'); \
-    print('✓ HEARTS model downloaded successfully'); \
-except Exception as e: \
-    print(f'Warning: Could not download HEARTS model: {e}'); \
-    print('Model will be downloaded on first use (slower cold starts)'); \
-    import traceback; \
-    traceback.print_exc(); \
-"
+    python -c "import os; os.environ['TRANSFORMERS_CACHE'] = '/app/.cache/huggingface'; from transformers import AutoTokenizer, AutoModelForSequenceClassification; tokenizer = AutoTokenizer.from_pretrained('holistic-ai/bias_classifier_albertv2'); model = AutoModelForSequenceClassification.from_pretrained('holistic-ai/bias_classifier_albertv2'); print('✓ HEARTS model downloaded')" || \
+    echo "Warning: HEARTS model download failed, will download on first use"
 
 # Copy application code
 COPY backend/ ./backend/
