@@ -155,15 +155,6 @@ def get_llm_service():
         raise Exception("Vertex AI LLM service not available")
     return get_vertex_llm_service()
 
-# Set LLM_AVAILABLE based on Vertex AI availability
-LLM_AVAILABLE = VERTEX_LLM_AVAILABLE
-
-def get_llm_service():
-    """Get LLM service (Vertex AI)"""
-    if not VERTEX_LLM_AVAILABLE:
-        raise Exception("Vertex AI LLM service not available")
-    return get_vertex_llm_service()
-
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_prompt():
@@ -341,12 +332,6 @@ def debias_prompt():
             'original_prompt': prompt,
             'debiased_prompt': result
         })
-
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({'status': 'healthy'})
 
 
 @app.route('/api/llm/debias', methods=['POST'])
