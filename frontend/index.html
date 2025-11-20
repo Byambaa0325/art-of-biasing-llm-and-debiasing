@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Art of Biasing LLM - Prompt Bias Analysis Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Art of Biasing LLM</h1>
+            <p class="subtitle">Understand how your prompts can contain bias and learn to normalize them</p>
+        </header>
+
+        <div class="input-section">
+            <h2>Enter Your Prompt</h2>
+            <textarea 
+                id="promptInput" 
+                placeholder="Type your prompt here... (e.g., 'What are the best programming languages?')"
+                rows="4"
+            ></textarea>
+            <button id="analyzeBtn" class="primary-btn">Analyze Prompt</button>
+        </div>
+
+        <div id="results" class="results-section" style="display: none;">
+            <!-- Bias Detection Results -->
+            <section id="biasDetection" class="result-card">
+                <h2>🔍 Detected Biases</h2>
+                <div id="biasScore" class="bias-score"></div>
+                <div id="biasDetails"></div>
+            </section>
+
+            <!-- Bias Injection Examples -->
+            <section id="biasInjection" class="result-card">
+                <h2>⚠️ How This Prompt Can Be Biased</h2>
+                <p class="section-explanation">See how subtle changes can introduce different types of bias:</p>
+                <div id="biasedVersions"></div>
+            </section>
+
+            <!-- Debiasing Methods -->
+            <section id="debiasing" class="result-card">
+                <h2>✨ How to Normalize/Debias This Prompt</h2>
+                <p class="section-explanation">Learn methods to remove bias and make your prompt more fair:</p>
+                <div id="debiasedVersions"></div>
+            </section>
+        </div>
+
+        <footer>
+            <p>Based on research: Neumann et al. (FAccT 2025), Sun & Kok (2025), Xu et al. (LREC 2024), Lyu et al. (2025)</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
