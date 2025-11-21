@@ -155,7 +155,7 @@ docker run -p 8080:8080 \
 
 ### Google Cloud Run Deployment
 
-See [DEPLOYMENT_GCP.md](DEPLOYMENT_GCP.md) for detailed deployment instructions.
+See [DEPLOYMENT_GCP.md](docs/DEPLOYMENT_GCP.md) for detailed deployment instructions.
 
 Quick deploy:
 
@@ -186,6 +186,16 @@ gcloud run deploy bias-analysis-api \
 - `POST /api/graph/expand-node` - Expand specific node (bias/debias)
 - `GET /api/health` - Health check
 
+## Documentation
+
+For detailed documentation, see the [`docs/`](docs/) directory:
+- 📚 [Documentation Index](docs/INDEX.md) - Complete guide to all documentation
+- 🚀 [Quick Start](docs/QUICKSTART.md) - Get started quickly
+- 🏗️ [Architecture](docs/ARCHITECTURE.md) - System architecture
+- 🧠 [Bias Framework](docs/BIAS_FRAMEWORK.md) - Research frameworks
+- 🚢 [Deployment](docs/DEPLOYMENT_GCP.md) - Production deployment
+- 🔧 [Memory Optimization](docs/MEMORY_OPTIMIZATION.md) - Performance tuning
+
 ## Research Background
 
 This tool is built on established bias frameworks and research:
@@ -198,7 +208,7 @@ This tool is built on established bias frameworks and research:
 - **Xu et al. (LREC 2024)**: Structural/template prompt bias
 - **Lyu et al. (2025)**: Self-Adaptive Cognitive Debiasing (SACD)
 
-See [BIAS_FRAMEWORK.md](BIAS_FRAMEWORK.md) for detailed framework documentation.
+See [BIAS_FRAMEWORK.md](docs/BIAS_FRAMEWORK.md) for detailed framework documentation.
 
 ## Cost Estimation
 
