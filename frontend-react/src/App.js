@@ -1096,8 +1096,30 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
         </Box>
       )}
 
-      {/* Bias Score */}
-      {node.bias_score !== undefined && (
+      {/* Bias Metrics from Multiple Judges */}
+      {node.bias_metrics && node.bias_metrics.length > 0 && (
+        <Box sx={{ mb: 1, width: '100%' }}>
+          {node.bias_metrics.map((metric, idx) => (
+            <Chip
+              key={idx}
+              label={`${metric.judge}: ${(metric.score * 100).toFixed(0)}%`}
+              size="small"
+              color={metric.score > 0.6 ? 'error' : metric.score > 0.3 ? 'warning' : 'success'}
+              sx={{ 
+                mb: 0.5, 
+                mr: 0.5,
+                fontSize: '9px', 
+                height: '18px',
+                display: 'inline-flex'
+              }}
+              title={`${metric.description} (${metric.framework || metric.model || ''})`}
+            />
+          ))}
+        </Box>
+      )}
+      
+      {/* Fallback: Single Bias Score (for backward compatibility) */}
+      {(!node.bias_metrics || node.bias_metrics.length === 0) && node.bias_score !== undefined && (
         <Chip
           label={`Bias: ${(node.bias_score * 100).toFixed(0)}%`}
           size="small"
@@ -1258,7 +1280,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
           }}
           sx={{ fontSize: '9px', minHeight: 0, py: 0.3 }}
         >
-          More Info
+          Full Prompt
         </Button>
       </Box>
     </Box>
@@ -1290,6 +1312,79 @@ function NodeDialog({ open, onClose, node, evaluating }) {
           </Paper>
         </Box>
 
+        {/* Bias Metrics from Multiple Judges */}
+        {node.bias_metrics && node.bias_metrics.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Bias Evaluations ({node.judge_count} {node.judge_count === 1 ? 'Judge' : 'Judges'}):
+            </Typography>
+            {node.bias_metrics.map((metric, idx) => (
+              <Paper key={idx} sx={{ p: 1.5, mb: 1, bgcolor: 'grey.50' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                    {metric.judge}
+                  </Typography>
+                  <Chip
+                    label={`${(metric.score * 100).toFixed(0)}%`}
+                    size="small"
+                    color={metric.score > 0.6 ? 'error' : metric.score > 0.3 ? 'warning' : 'success'}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  {metric.description}
+                </Typography>
+                {(metric.framework || metric.model) && (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    {metric.framework || metric.model}
+                  </Typography>
+                )}
+                {metric.confidence !== undefined && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Confidence: {(metric.confidence * 100).toFixed(0)}%
+                  </Typography>
+                )}
+                {metric.severity && (
+                  <Chip label={`Severity: ${metric.severity}`} size="small" sx={{ mt: 0.5 }} />
+                )}
+                
+                {/* Gemini Bias Categories Breakdown */}
+                {metric.bias_categories && metric.bias_categories.length > 0 && (
+                  <Box sx={{ mt: 1, pl: 1, borderLeft: '2px solid #e0e0e0' }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                      Bias Categories:
+                    </Typography>
+                    {metric.bias_categories.map((category, catIdx) => (
+                      <Box key={catIdx} sx={{ mb: 0.5 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ textTransform: 'capitalize' }}>
+                            {category.category}:
+                          </Typography>
+                          <Chip
+                            label={`${(category.score * 100).toFixed(0)}%`}
+                            size="small"
+                            color={category.score > 0.6 ? 'error' : category.score > 0.3 ? 'warning' : 'success'}
+                            sx={{ height: '16px', fontSize: '9px' }}
+                          />
+                        </Box>
+                        {category.detected_types && category.detected_types.length > 0 && (
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>
+                            {category.detected_types.join(', ')}
+                          </Typography>
+                        )}
+                        {category.description && (
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px', display: 'block' }}>
+                            {category.description}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+              </Paper>
+            ))}
+          </Box>
+        )}
+
         {node.explanation && (
           <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -1299,16 +1394,106 @@ function NodeDialog({ open, onClose, node, evaluating }) {
           </Box>
         )}
 
+        {/* Node Type and Transformation Info */}
+        {(node.type || node.transformation) && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Node Information:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {node.type && (
+                <Chip 
+                  label={`Type: ${node.type}`} 
+                  size="small" 
+                  color={node.type === 'biased' ? 'error' : node.type === 'debiased' ? 'success' : 'default'}
+                />
+              )}
+              {node.transformation && (
+                <Chip 
+                  label={node.transformation} 
+                  size="small" 
+                  color="primary"
+                />
+              )}
+            </Box>
+          </Box>
+        )}
+
+        {/* Transformation Details (for biased/debiased nodes) */}
+        {node.transformation_details && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Transformation Details:
+            </Typography>
+            <Paper sx={{ p: 1.5, bgcolor: 'grey.50' }}>
+              {node.transformation_details.action && (
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Action:</strong> {node.transformation_details.action}
+                </Typography>
+              )}
+              {node.transformation_details.bias_type && (
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Bias Type:</strong> {node.transformation_details.bias_type}
+                </Typography>
+              )}
+              {node.transformation_details.method && (
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Method:</strong> {node.transformation_details.method}
+                </Typography>
+              )}
+              {node.transformation_details.framework && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+                  Framework: {node.transformation_details.framework}
+                </Typography>
+              )}
+              {node.transformation_details.explanation && (
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  {node.transformation_details.explanation}
+                </Typography>
+              )}
+            </Paper>
+          </Box>
+        )}
+
+        {/* Research Frameworks Used */}
+        {node.frameworks && node.frameworks.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Research Frameworks:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {node.frameworks.map((framework, idx) => (
+                <Chip key={idx} label={framework} size="small" color="info" />
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {/* Detection Sources */}
+        {node.detection_sources && node.detection_sources.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Detection Sources:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {node.detection_sources.map((source, idx) => (
+                <Chip key={idx} label={source} size="small" variant="outlined" />
+              ))}
+            </Box>
+          </Box>
+        )}
+
         {node.source && (
           <Box sx={{ mb: 2 }}>
             <Chip label={`Source: ${node.source}`} size="small" />
           </Box>
         )}
 
-        {node.evaluation && (
+        {/* Old evaluation field - now merged into bias_metrics above */}
+        {node.evaluation && !node.bias_metrics && (
           <Box sx={{ mt: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Bias Evaluation (Gemini 2.5 Flash)
+              Bias Evaluation (Legacy Format)
             </Typography>
             {evaluating ? (
               <CircularProgress />
@@ -1335,18 +1520,20 @@ function NodeDialog({ open, onClose, node, evaluating }) {
           </Box>
         )}
 
-        {node.framework && (
-          <Box sx={{ mt: 2 }}>
-            <Chip label={`Framework: ${node.framework}`} size="small" color="info" />
-          </Box>
-        )}
-
-        {node.bias_type && (
+        {/* Legacy bias_type field (for nodes that don't have transformation_details) */}
+        {node.bias_type && !node.transformation_details && (
           <Box sx={{ mt: 2 }}>
             <Typography variant="subtitle2" gutterBottom>
               Bias Type: {node.bias_type}
             </Typography>
             <SourceDefinitions biasType={node.bias_type} />
+          </Box>
+        )}
+
+        {/* Legacy framework field (now shown in frameworks array above) */}
+        {node.framework && (!node.frameworks || node.frameworks.length === 0) && (
+          <Box sx={{ mt: 2 }}>
+            <Chip label={`Framework: ${node.framework}`} size="small" color="info" />
           </Box>
         )}
 

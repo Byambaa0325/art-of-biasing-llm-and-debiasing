@@ -677,7 +677,12 @@ def graph_expand():
                 'model': 'Gemini 2.5 Flash' if gemini_data else None
             },
 
-            # Overall metrics (ensemble)
+            # Bias metrics from individual judges (not aggregated)
+            'bias_metrics': detected_biases.get('bias_metrics', []),
+            'judge_count': detected_biases.get('judge_count', 0),
+            'judges_used': detected_biases.get('judges_used', []),
+            
+            # Overall metrics (for backward compatibility)
             'bias_score': float(detected_biases.get('overall_bias_score', 0)),
             'confidence': float(detected_biases.get('confidence', 0)),
             'source_agreement': float(detected_biases.get('source_agreement', 1.0)),
@@ -915,7 +920,12 @@ def graph_expand_node():
                 'model': 'Gemini 2.5 Flash' if gemini_data else None
             },
 
-            # Overall metrics
+            # Bias metrics from individual judges (not aggregated)
+            'bias_metrics': detected_biases.get('bias_metrics', []),
+            'judge_count': detected_biases.get('judge_count', 0),
+            'judges_used': detected_biases.get('judges_used', []),
+            
+            # Overall metrics (for backward compatibility)
             'bias_score': float(detected_biases.get('overall_bias_score', 0)),
             'confidence': float(detected_biases.get('confidence', 0)),
             'source_agreement': float(detected_biases.get('source_agreement', 1.0)),

@@ -203,12 +203,20 @@ class BiasAggregator:
             gemini_result
         )
 
-        # Calculate ensemble scores
-        result['overall_bias_score'] = self._calculate_ensemble_score(
+        # Calculate bias metrics from all judges (not aggregated)
+        bias_evaluation = self._calculate_ensemble_score(
             rule_result,
             hearts_result,
             gemini_result
         )
+        
+        # Add individual bias metrics
+        result['bias_metrics'] = bias_evaluation['bias_metrics']
+        result['judge_count'] = bias_evaluation['judge_count']
+        result['judges_used'] = bias_evaluation['judges_used']
+        
+        # Keep overall_bias_score for backward compatibility (average of all judges)
+        result['overall_bias_score'] = sum(m['score'] for m in bias_evaluation['bias_metrics']) / len(bias_evaluation['bias_metrics']) if bias_evaluation['bias_metrics'] else 0
 
         result['confidence'] = self._calculate_confidence(
             rule_result,
@@ -296,14 +304,12 @@ class BiasAggregator:
         rule_result: Dict[str, Any],
         hearts_result: Optional[Dict[str, Any]],
         gemini_result: Optional[Dict[str, Any]]
-    ) -> float:
+    ) -> Dict[str, Any]:
         """
-        Calculate weighted ensemble bias score.
+        Calculate bias metrics from multiple judges.
 
-        Weights:
-        - Rule-based: 0.3 (good for cognitive/structural biases)
-        - HEARTS: 0.5 (best for stereotype detection)
-        - Gemini: 0.2 (validation layer)
+        Returns individual bias scores with their judge models instead of
+        aggregating to a single score.
 
         Args:
             rule_result: Rule-based detection results
@@ -311,40 +317,54 @@ class BiasAggregator:
             gemini_result: Gemini validation results
 
         Returns:
-            Ensemble bias score (0-1)
+            Dictionary with array of individual bias metrics
         """
-        scores = []
-        weights = []
+        bias_metrics = []
 
         # Rule-based score
         rule_score = rule_result.get('overall_bias_score', 0)
-        scores.append(rule_score)
-        weights.append(0.3)
+        bias_metrics.append({
+            'judge': 'Rule-Based Detector',
+            'score': rule_score,
+            'confidence': 1.0,  # Rule-based is deterministic
+            'description': 'Pattern-matching for cognitive, demographic, and structural biases',
+            'framework': 'BEATS Framework, Neumann et al. (FAccT 2025)'
+        })
 
         # HEARTS score
         if hearts_result:
             hearts_score = hearts_result['probabilities']['Stereotype']
-            scores.append(hearts_score)
-            weights.append(0.5)
-        else:
-            # Adjust weights if HEARTS not available
-            weights[0] = 0.6  # Increase rule-based weight
+            bias_metrics.append({
+                'judge': 'HEARTS ALBERT-v2',
+                'score': hearts_score,
+                'confidence': hearts_result.get('confidence', 0),
+                'description': 'ML-based stereotype detection with 81.5% F1 score',
+                'framework': 'HEARTS (King et al., 2024)',
+                'model': 'holistic-ai/bias_classifier_albertv2'
+            })
 
-        # Gemini score
+        # Gemini score with bias categories
         if gemini_result:
             evaluation = gemini_result.get('evaluation', {})
             gemini_score = evaluation.get('bias_score', 0.5)
-            scores.append(gemini_score)
-            weights.append(0.2)
+            bias_categories = evaluation.get('bias_categories', [])
+            
+            bias_metrics.append({
+                'judge': 'Gemini 2.5 Flash',
+                'score': gemini_score,
+                'confidence': 0.85,  # LLM-based, good but not perfect
+                'description': 'LLM-based bias evaluation with contextual understanding across multiple categories',
+                'severity': evaluation.get('overall_severity', evaluation.get('severity', 'unknown')),
+                'bias_types': evaluation.get('bias_types', []),
+                'bias_categories': bias_categories,  # Detailed category scores
+                'model': 'publishers/google/models/gemini-2.0-flash-exp'
+            })
 
-        # Normalize weights
-        total_weight = sum(weights)
-        weights = [w / total_weight for w in weights]
-
-        # Calculate weighted average
-        ensemble_score = sum(s * w for s, w in zip(scores, weights))
-
-        return min(1.0, max(0.0, ensemble_score))
+        return {
+            'bias_metrics': bias_metrics,
+            'judge_count': len(bias_metrics),
+            'judges_used': [m['judge'] for m in bias_metrics]
+        }
 
     def _calculate_confidence(
         self,

@@ -593,33 +593,58 @@ Return only the debiased prompt, without explanation."""
     
     def evaluate_bias(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
         """
-        Use Gemini 2.5 Flash to evaluate bias in a prompt.
+        Use Gemini 2.5 Flash to evaluate bias in a prompt across multiple bias categories.
         
         Args:
             prompt: Prompt to evaluate
             context: Optional context about the prompt
             
         Returns:
-            Dictionary with bias evaluation results
+            Dictionary with bias evaluation results including scores per bias type
         """
         if not self.gemini_model:
             raise ValueError("Gemini model not available for evaluation")
         
-        evaluation_prompt = f"""Evaluate the following prompt for potential biases. Consider:
-1. Demographic biases (race, gender, age, religion, etc.)
-2. Cognitive biases (confirmation, anchoring, framing, etc.)
-3. Language-level biases (stereotypes, assumptions, leading questions)
+        evaluation_prompt = f"""Evaluate the following prompt for potential biases across multiple categories. 
 
 Prompt to evaluate: "{prompt}"
 
 {f'Context: {context}' if context else ''}
 
-Provide a JSON response with:
-- bias_score: 0-1 (0 = no bias, 1 = high bias)
-- bias_types: list of detected bias types
-- severity: "low", "moderate", or "high"
-- explanation: brief explanation
-- recommendations: suggestions for debiasing"""
+Provide a detailed evaluation as JSON with the following structure:
+{{
+  "bias_categories": [
+    {{
+      "category": "demographic",
+      "score": 0.0-1.0,
+      "detected_types": ["gender", "race", "age", etc.],
+      "description": "Brief assessment of demographic biases"
+    }},
+    {{
+      "category": "cognitive",
+      "score": 0.0-1.0,
+      "detected_types": ["confirmation", "anchoring", "framing", etc.],
+      "description": "Brief assessment of cognitive biases"
+    }},
+    {{
+      "category": "stereotyping",
+      "score": 0.0-1.0,
+      "detected_types": ["gender stereotypes", "cultural stereotypes", etc.],
+      "description": "Brief assessment of stereotypical language"
+    }},
+    {{
+      "category": "structural",
+      "score": 0.0-1.0,
+      "detected_types": ["template bias", "positional bias", "leading questions"],
+      "description": "Brief assessment of structural/language biases"
+    }}
+  ],
+  "overall_severity": "low" | "moderate" | "high",
+  "explanation": "Overall explanation of detected biases",
+  "recommendations": "Suggestions for debiasing"
+}}
+
+Score each category from 0 (no bias) to 1 (high bias). Be specific about which sub-types are detected."""
         
         try:
             response = self.gemini_model.generate_content(
@@ -656,30 +681,43 @@ Provide a JSON response with:
     def _parse_text_evaluation(self, text: str) -> Dict[str, Any]:
         """Parse text evaluation response into structured format"""
         # Simple parsing - can be improved
-        bias_score = 0.5  # Default
-        bias_types = []
+        import re
+        
+        # Default structure with bias categories
+        bias_categories = []
         severity = "moderate"
         
-        # Try to extract score
-        import re
-        score_match = re.search(r'(?:bias[_\s]*score|score)[:\s]*([0-9.]+)', text, re.IGNORECASE)
-        if score_match:
-            bias_score = float(score_match.group(1))
-        
-        # Extract severity
+        # Try to extract severity
         if 'high' in text.lower():
             severity = "high"
-            bias_score = max(bias_score, 0.7)
         elif 'low' in text.lower():
             severity = "low"
-            bias_score = min(bias_score, 0.3)
+        
+        # Try to parse category scores from text
+        categories = ['demographic', 'cognitive', 'stereotyping', 'structural']
+        for category in categories:
+            # Look for category mentions with scores
+            pattern = rf'{category}[:\s]*([0-9.]+)'
+            match = re.search(pattern, text, re.IGNORECASE)
+            score = float(match.group(1)) if match else 0.5
+            
+            bias_categories.append({
+                'category': category,
+                'score': score,
+                'detected_types': [],
+                'description': f'Detected in text evaluation'
+            })
+        
+        # Calculate overall score as average
+        overall_score = sum(c['score'] for c in bias_categories) / len(bias_categories) if bias_categories else 0.5
         
         return {
-            'bias_score': bias_score,
-            'bias_types': bias_types,
-            'severity': severity,
+            'bias_categories': bias_categories,
+            'bias_score': overall_score,  # For backward compatibility
+            'overall_severity': severity,
             'explanation': text,
-            'recommendations': 'Review the prompt for potential biases.'
+            'recommendations': 'Review the prompt for potential biases.',
+            'bias_types': []  # Legacy field
         }
     
     def generate_answer(self, prompt: str, system_prompt: Optional[str] = None) -> str:
