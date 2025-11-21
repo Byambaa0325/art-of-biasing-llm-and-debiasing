@@ -56,13 +56,21 @@ class HEARTSDetector:
         1: "Stereotype"
     }
 
-    def __init__(self, model_name: Optional[str] = None, device: Optional[str] = None):
+    def __init__(
+        self, 
+        model_name: Optional[str] = None, 
+        device: Optional[str] = None,
+        enable_shap: bool = False,
+        enable_lime: bool = False
+    ):
         """
         Initialize HEARTS detector.
 
         Args:
             model_name: HuggingFace model name (default: holistic-ai/bias_classifier_albertv2)
             device: Device to run on ('cpu', 'cuda', or None for auto-detect)
+            enable_shap: Enable SHAP explainer (memory-intensive, default: False)
+            enable_lime: Enable LIME explainer (very memory-intensive, default: False)
         """
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError(
@@ -70,6 +78,8 @@ class HEARTSDetector:
             )
 
         self.model_name = model_name or self.MODEL_NAME
+        self.enable_shap = enable_shap
+        self.enable_lime = enable_lime
 
         # Auto-detect device
         if device is None:
@@ -78,6 +88,8 @@ class HEARTSDetector:
             self.device = device
 
         print(f"Loading HEARTS model: {self.model_name} on {self.device}...")
+        if not enable_shap and not enable_lime:
+            print("  SHAP/LIME explainers disabled (memory-efficient mode)")
 
         # Load model and tokenizer with production-friendly settings
         try:
@@ -150,9 +162,9 @@ class HEARTSDetector:
                     f"  Error type: {error_type}"
                 )
 
-        # Initialize SHAP explainer (optional)
+        # Initialize SHAP explainer (optional, disabled by default for memory efficiency)
         self.shap_explainer = None
-        if SHAP_AVAILABLE:
+        if self.enable_shap and SHAP_AVAILABLE:
             try:
                 # Create a wrapper function for SHAP
                 def model_predict(texts):
@@ -167,21 +179,30 @@ class HEARTSDetector:
                         ).to(self.device)
                         outputs = self.model(**inputs)
                         probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                        return probs.cpu().numpy()
+                        result = probs.cpu().numpy()
+                        
+                        # Clean up tensors
+                        del inputs, outputs, probs
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        
+                        return result
 
                 self.shap_explainer = shap.Explainer(model_predict, self.tokenizer)
-                print("✓ SHAP explainer initialized")
+                print("✓ SHAP explainer initialized (memory usage: ~500MB)")
             except Exception as e:
                 print(f"Warning: Could not initialize SHAP: {e}")
+                self.shap_explainer = None
 
-        # Initialize LIME explainer (optional)
+        # Initialize LIME explainer (optional, disabled by default for memory efficiency)
         self.lime_explainer = None
-        if LIME_AVAILABLE:
+        if self.enable_lime and LIME_AVAILABLE:
             try:
                 self.lime_explainer = LimeTextExplainer(class_names=list(self.LABELS.values()))
-                print("✓ LIME explainer initialized")
+                print("✓ LIME explainer initialized (memory usage: ~300MB per request)")
             except Exception as e:
                 print(f"Warning: Could not initialize LIME: {e}")
+                self.lime_explainer = None
 
     def detect_stereotypes(
         self,
@@ -215,10 +236,15 @@ class HEARTSDetector:
             logits = outputs.logits
             probs = torch.nn.functional.softmax(logits, dim=-1)
 
-        # Extract probabilities
+        # Extract probabilities (move to CPU and convert immediately)
         probs_np = probs.cpu().numpy()[0]
         non_stereotype_prob = float(probs_np[0])
         stereotype_prob = float(probs_np[1])
+
+        # Clean up tensors immediately to free memory
+        del inputs, outputs, logits, probs, probs_np
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Determine prediction
         predicted_class = 1 if stereotype_prob > confidence_threshold else 0
@@ -266,7 +292,7 @@ class HEARTSDetector:
             'token_importance': []
         }
 
-        # SHAP explanations
+        # SHAP explanations (memory-intensive, only run if explainer exists)
         if self.shap_explainer is not None:
             try:
                 shap_values = self.shap_explainer([text])
@@ -291,10 +317,15 @@ class HEARTSDetector:
                 explanations['token_importance'] = token_importance[:10]  # Top 10
                 explanations['shap_available'] = True
 
+                # Explicitly delete SHAP values to free memory
+                del shap_values, values, token_importance
+
             except Exception as e:
                 print(f"Warning: SHAP explanation failed: {e}")
 
         # LIME explanations (as alternative/complement)
+        # NOTE: LIME is very memory-intensive (generates hundreds of samples)
+        # Consider disabling in production if memory is constrained
         if self.lime_explainer is not None:
             try:
                 def predict_proba(texts):
@@ -309,7 +340,14 @@ class HEARTSDetector:
                         ).to(self.device)
                         outputs = self.model(**inputs)
                         probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                        return probs.cpu().numpy()
+                        result = probs.cpu().numpy()
+                        
+                        # Clean up tensors immediately
+                        del inputs, outputs, probs
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        
+                        return result
 
                 lime_exp = self.lime_explainer.explain_instance(
                     text,
@@ -325,6 +363,9 @@ class HEARTSDetector:
                     for token, score in lime_importance
                 ]
                 explanations['lime_available'] = True
+
+                # Clean up LIME objects
+                del lime_exp, lime_importance
 
             except Exception as e:
                 print(f"Warning: LIME explanation failed: {e}")

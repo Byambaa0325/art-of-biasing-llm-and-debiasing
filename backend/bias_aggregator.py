@@ -84,8 +84,14 @@ class BiasAggregator:
         self.hearts_enabled = self.use_hearts
         self.llm_enabled = self.llm_service is not None
     
-    def _initialize_hearts(self):
-        """Lazy initialization of HEARTS detector"""
+    def _initialize_hearts(self, enable_shap: bool = False, enable_lime: bool = False):
+        """
+        Lazy initialization of HEARTS detector.
+        
+        Args:
+            enable_shap: Enable SHAP explainer (memory-intensive, default: False)
+            enable_lime: Enable LIME explainer (very memory-intensive, default: False)
+        """
         if self._hearts_initialized:
             return
         
@@ -98,7 +104,11 @@ class BiasAggregator:
         
         try:
             print("Initializing HEARTS detector (lazy load)...")
-            self.hearts_detector = HEARTSDetector()
+            # Initialize with SHAP/LIME disabled by default to save memory
+            self.hearts_detector = HEARTSDetector(
+                enable_shap=enable_shap,
+                enable_lime=enable_lime
+            )
             self._hearts_initialized = True
             print("✓ HEARTS detector initialized successfully")
         except Exception as e:

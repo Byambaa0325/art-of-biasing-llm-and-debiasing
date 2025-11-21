@@ -22,6 +22,12 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--memory'
+      - '4Gi'  # Increased from default 2Gi for HEARTS model (~500MB) + processing headroom
+      - '--cpu'
+      - '2'
+      - '--max-instances'
+      - '10'
       - '--set-env-vars'
       - 'GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_LOCATION=us-central1'
 

@@ -29,6 +29,8 @@ class UsageTracker:
     def __init__(self):
         self.usage = {}  # {api_key: {date: count, cost: float}}
         self.rate_limits = {}  # {api_key: [(timestamp, endpoint), ...]}
+        self._last_cleanup = time.time()
+        self.cleanup_interval = 3600  # Run cleanup every hour
 
     def get_daily_usage(self, api_key: str) -> int:
         """Get number of requests today for this API key."""
@@ -97,6 +99,59 @@ class UsageTracker:
                 for day_data in self.usage.get(api_key, {}).values()
             )
         }
+
+    def cleanup_old_data(self, days_to_keep: int = 7):
+        """
+        Remove usage data older than specified days to prevent memory leaks.
+        
+        Args:
+            days_to_keep: Number of days to keep in memory (default: 7)
+        """
+        cutoff_date = (datetime.now() - timedelta(days=days_to_keep)).strftime('%Y-%m-%d')
+        
+        # Clean up old usage data
+        keys_to_remove = []
+        for api_key, dates in list(self.usage.items()):
+            # Remove old dates
+            old_dates = [date for date in dates if date < cutoff_date]
+            for date in old_dates:
+                del dates[date]
+            
+            # Remove API key entry if no data left
+            if not dates:
+                keys_to_remove.append(api_key)
+        
+        for key in keys_to_remove:
+            del self.usage[key]
+        
+        # Clean up empty rate_limit entries (keeps only active keys)
+        now = time.time()
+        empty_keys = []
+        for api_key, timestamps in list(self.rate_limits.items()):
+            # Remove timestamps older than 1 hour
+            self.rate_limits[api_key] = [
+                (ts, ep) for ts, ep in timestamps
+                if now - ts < 3600
+            ]
+            # Mark for removal if empty
+            if not self.rate_limits[api_key]:
+                empty_keys.append(api_key)
+        
+        for key in empty_keys:
+            del self.rate_limits[key]
+        
+        if keys_to_remove or empty_keys:
+            print(f"UsageTracker: Cleaned up {len(keys_to_remove)} usage entries, {len(empty_keys)} rate limit entries")
+    
+    def auto_cleanup_if_needed(self):
+        """
+        Automatically run cleanup if enough time has passed.
+        Called on each request to prevent memory buildup.
+        """
+        now = time.time()
+        if now - self._last_cleanup > self.cleanup_interval:
+            self.cleanup_old_data()
+            self._last_cleanup = now
 
 
 # Global usage tracker
@@ -239,6 +294,9 @@ def rate_limit(endpoint_name: str = None, cost_estimate: float = 0.0):
             if not SecurityConfig.ENABLE_RATE_LIMITING and not SecurityConfig.ENABLE_QUOTAS:
                 return f(*args, **kwargs)
 
+            # Run periodic cleanup to prevent memory leaks
+            usage_tracker.auto_cleanup_if_needed()
+
             # Get identifier - prioritize IP-based tracking
             client_ip = get_client_ip()
             api_key = getattr(request, 'api_key', None)
@@ -362,7 +420,11 @@ def rate_limit(endpoint_name: str = None, cost_estimate: float = 0.0):
                 remaining_today = SecurityConfig.IP_DAILY_REQUEST_QUOTA - usage_tracker.get_daily_usage(ip_identifier)
                 response_obj.headers['X-RateLimit-Remaining-Today'] = str(max(0, remaining_today))
 
-            return response_obj, status_code if isinstance(response, tuple) else response_obj
+            # Return tuple if original response was a tuple, otherwise just the response object
+            if isinstance(response, tuple):
+                return response_obj, status_code
+            else:
+                return response_obj
 
         return decorated_function
 

@@ -18,6 +18,7 @@ import os
 import sys
 import uuid
 import json
+import gc
 from datetime import datetime
 from typing import Any
 from pathlib import Path
@@ -184,6 +185,26 @@ def get_llm_service():
     if not VERTEX_LLM_AVAILABLE:
         raise Exception("Vertex AI LLM service not available")
     return get_vertex_llm_service()
+
+
+# Memory management: Force garbage collection after every request
+@app.after_request
+def cleanup_memory(response):
+    """
+    Run garbage collection after each request to prevent memory leaks.
+    Critical for ML models (HEARTS, torch tensors, SHAP/LIME objects).
+    """
+    gc.collect()
+    
+    # If torch is available, clear CUDA cache too
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+    
+    return response
 
 
 @app.route('/api/analyze', methods=['POST'])

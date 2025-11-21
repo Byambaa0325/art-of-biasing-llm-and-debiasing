@@ -72,5 +72,7 @@ USER appuser
 
 # Run the application
 # Cloud Run sets PORT environment variable
-CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 2 --timeout 300 backend.api:app
+# Use 1 worker to reduce memory footprint (HEARTS model is ~500MB per worker)
+# Increase threads to handle concurrent requests within single worker
+CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 4 --timeout 300 --max-requests 1000 --max-requests-jitter 50 backend.api:app
 

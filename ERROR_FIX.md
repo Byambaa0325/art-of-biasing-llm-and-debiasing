@@ -178,3 +178,4 @@ from bias_instructions import get_bias_instruction, BIAS_INSTRUCTIONS
 ```
 
 **Files Modified**: `backend/vertex_llm_service.py` (line 237 and 240)
+

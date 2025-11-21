@@ -22,3 +22,4 @@ echo   python -c "import google.cloud.aiplatform; print('OK')"
 echo.
 pause
 
+
