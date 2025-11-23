@@ -31,26 +31,6 @@ AVAILABLE_MODELS = {
         'endpoint_type': 'openapi'
     },
 
-    # Meta Llama 3.2 Models
-    'meta/llama-3.2-90b-vision-instruct-maas': {
-        'name': 'Llama 3.2 90B Vision',
-        'provider': 'Meta',
-        'category': 'both',
-        'description': 'Llama 3.2 with vision capabilities and strong reasoning',
-        'context_window': 128000,
-        'recommended_for': ['generation', 'evaluation'],
-        'endpoint_type': 'openapi'
-    },
-    'meta/llama-3.2-11b-vision-instruct-maas': {
-        'name': 'Llama 3.2 11B Vision',
-        'provider': 'Meta',
-        'category': 'both',
-        'description': 'Compact Llama 3.2 with vision, fast and efficient',
-        'context_window': 128000,
-        'recommended_for': ['generation'],
-        'endpoint_type': 'openapi'
-    },
-
     # Meta Llama 3.1 Models
     'meta/llama-3.1-405b-instruct-maas': {
         'name': 'Llama 3.1 405B',
@@ -71,26 +51,6 @@ AVAILABLE_MODELS = {
         'endpoint_type': 'openapi'
     },
 
-    # Mistral Models
-    'mistral-medium-2505': {
-        'name': 'Mistral Medium 3',
-        'provider': 'Mistral AI',
-        'category': 'both',
-        'description': 'Mistral Medium 3, balanced performance for most tasks',
-        'context_window': 128000,
-        'recommended_for': ['generation', 'evaluation'],
-        'endpoint_type': 'vertex_sdk'
-    },
-    'mistral-small-2501': {
-        'name': 'Mistral Small 3.1',
-        'provider': 'Mistral AI',
-        'category': 'both',
-        'description': 'Mistral Small 3.1, fast and cost-effective',
-        'context_window': 128000,
-        'recommended_for': ['generation'],
-        'endpoint_type': 'vertex_sdk'
-    },
-
     # Google Gemini Models (for comparison)
     'gemini-2.0-flash-exp': {
         'name': 'Gemini 2.0 Flash',
@@ -98,7 +58,7 @@ AVAILABLE_MODELS = {
         'category': 'both',
         'description': 'Latest Gemini flash model, fast and capable',
         'context_window': 1000000,
-        'recommended_for': ['evaluation'],
+        'recommended_for': ['generation', 'evaluation'],
         'endpoint_type': 'vertex_sdk'
     },
     'gemini-1.5-pro-002': {
@@ -107,7 +67,7 @@ AVAILABLE_MODELS = {
         'category': 'both',
         'description': 'Google\'s Pro model with extended context',
         'context_window': 2000000,
-        'recommended_for': ['evaluation'],
+        'recommended_for': ['generation', 'evaluation'],
         'endpoint_type': 'vertex_sdk'
     },
     'gemini-1.5-flash-002': {
@@ -116,7 +76,7 @@ AVAILABLE_MODELS = {
         'category': 'both',
         'description': 'Fast Gemini model for quick tasks',
         'context_window': 1000000,
-        'recommended_for': ['evaluation'],
+        'recommended_for': ['generation', 'evaluation'],
         'endpoint_type': 'vertex_sdk'
     },
 }

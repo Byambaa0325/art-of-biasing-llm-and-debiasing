@@ -1,3 +1,12 @@
+## Novelty
+
+How does multi turn cognitive biased conversations affect stereotype biases of LLMs.
+
+The increasing deployment of Large Language Models (LLM) in the workplace and consumer products are putting the study of implicit biases and stereotypes an important guardrail of deployments. Unlike the stereotypes that exist in the world, a large scale deployment of unknowingly biased model can amplify a singular set of biases throughout the society. While stereotypes and biases are studied extensively, the most of deployed LLM systems offer a conversational interface and work in the context of user's subjective prompts within multi turn prompts. It is widely understood that multi turn conversations and irrelevant contexts affect the performances and fairness of LLMs. We extend the HEARTS dataset by Theo et al with multi turn conversations that explicitly injects fragmented cognitive biased dialogue, such as anchoring effect, to evaluate how susceptible the LLM models are to user's cognitive baises. We further offer explainability techniques, SNAP and LIME, to understand where the token level importance for these changes.
+1. https://arxiv.org/pdf/2409.11579
+2. https://arxiv.org/pdf/2410.19317
+3. https://arxiv.org/pdf/2505.06120
+
 # Bias Framework for LLM Prompt Analysis
 
 This document outlines the comprehensive bias framework used in this project, based on established research and recent academic work.

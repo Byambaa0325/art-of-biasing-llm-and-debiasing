@@ -869,9 +869,30 @@ function App() {
         }}
       >
         <Box sx={{ flex: 1, mr: 2 }}>
-          <Typography variant="subtitle2" sx={{ opacity: 0.9, fontSize: '0.75rem' }}>
-            Analyzing Prompt:
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ opacity: 0.9, fontSize: '0.75rem' }}>
+              Analyzing Prompt:
+            </Typography>
+            <Box
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(10px)',
+                px: 1.5,
+                py: 0.3,
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+              }}
+            >
+              <Typography variant="caption" sx={{ opacity: 0.9, fontSize: '0.7rem', fontWeight: 500 }}>
+                Model:
+              </Typography>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 'bold' }}>
+                {availableModels.find(m => m.id === selectedModel)?.name || 'Llama 3.3 70B'}
+              </Typography>
+            </Box>
+          </Box>
           <Typography
             variant="body1"
             sx={{
