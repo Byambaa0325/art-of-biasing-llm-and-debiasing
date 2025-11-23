@@ -1,0 +1,24 @@
+[run]
+source = .
+omit =
+    tests/*
+    */__pycache__/*
+    */site-packages/*
+    setup.py
+    conftest.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstract
+
+show_missing = True
+precision = 2
+
+[html]
+directory = htmlcov
