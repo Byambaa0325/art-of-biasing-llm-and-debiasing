@@ -220,6 +220,7 @@ class BedrockClient:
 
         payload = {
             "team_id": self.team_id,
+            "api_token": self.api_token,
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,

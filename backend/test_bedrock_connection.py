@@ -4,6 +4,7 @@ Run this to test your setup after configuring credentials.
 """
 
 import sys
+import os
 from bedrock_client import BedrockClient, BedrockModels, load_env_file, BedrockAPIError
 
 
@@ -16,8 +17,23 @@ def test_connection():
     # Step 1: Load credentials
     print("\n[1/4] Loading credentials from .env.bedrock...")
     try:
-        load_env_file(".env.bedrock")
-        print("✓ Credentials loaded")
+        # Try current directory first, then parent directory
+        env_paths = [".env.bedrock", "../.env.bedrock"]
+        env_loaded = False
+        
+        for env_path in env_paths:
+            if os.path.exists(env_path):
+                load_env_file(env_path)
+                print(f"✓ Credentials loaded from {env_path}")
+                env_loaded = True
+                break
+        
+        if not env_loaded:
+            print("✗ .env.bedrock file not found in current or parent directory")
+            print("\nPlease create .env.bedrock file with your credentials:")
+            print("  1. Copy .env.bedrock.example to .env.bedrock")
+            print("  2. Edit .env.bedrock and add your BEDROCK_TEAM_ID and BEDROCK_API_TOKEN")
+            return False
     except Exception as e:
         print(f"✗ Error loading credentials: {e}")
         print("\nPlease create .env.bedrock file with your credentials:")
@@ -52,12 +68,16 @@ def test_connection():
         print(f"  Response: {response[:100]}")
     except BedrockAPIError as e:
         print(f"✗ API Error [{e.status_code}]: {e.message}")
+        if e.response:
+            print(f"  Full error response: {e.response}")
         if e.status_code == 401:
             print("\n  → Check your team_id and api_token")
         elif e.status_code == 403:
             print("\n  → Model may not be available")
         elif e.status_code == 429:
             print("\n  → Budget exhausted")
+        elif e.status_code == 400:
+            print("\n  → Check request format and parameters")
         return False
     except Exception as e:
         print(f"✗ Unexpected error: {e}")
@@ -102,7 +122,13 @@ def test_models():
     print("Testing Model Availability")
     print("=" * 60)
 
-    load_env_file(".env.bedrock")
+    # Try current directory first, then parent directory
+    env_paths = [".env.bedrock", "../.env.bedrock"]
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            load_env_file(env_path)
+            break
+    
     client = BedrockClient()
 
     test_models = [
