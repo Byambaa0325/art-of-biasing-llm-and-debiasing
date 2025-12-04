@@ -125,14 +125,29 @@ class BedrockLLMService:
             )
             
             # Extract text from response
+            # Bedrock response format: {"content": [{"text": "..."}], "metadata": {...}}
+            # Use the same pattern as bedrock_client.chat() method: response["content"][0]["text"]
             if isinstance(response, dict):
-                content = response.get("content", [])
-                if content and isinstance(content, list) and len(content) > 0:
-                    if isinstance(content[0], dict):
-                        return content[0].get("text", str(content[0]))
-                    return str(content[0])
-                return str(response)
-            return str(response)
+                try:
+                    # Direct extraction like chat() method
+                    text = response["content"][0]["text"]
+                    if text:
+                        return text
+                except (KeyError, IndexError, TypeError) as e:
+                    # If direct extraction fails, try fallback methods
+                    content = response.get("content", [])
+                    if isinstance(content, list) and len(content) > 0:
+                        first_item = content[0]
+                        if isinstance(first_item, dict):
+                            text = first_item.get("text", "")
+                            if text:
+                                return text
+                        elif isinstance(first_item, str):
+                            return first_item
+                    # Last resort: return error message
+                    raise Exception(f"Could not extract text from response. Response structure: {response}")
+            else:
+                raise Exception(f"Unexpected response type: {type(response)}, value: {response}")
         except Exception as e:
             raise Exception(f"Bedrock generation failed: {str(e)}")
     
@@ -532,4 +547,5 @@ def get_bedrock_llm_service(
         default_model=default_model,
         evaluation_model=evaluation_model
     )
+
 
