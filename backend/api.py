@@ -886,8 +886,20 @@ def graph_expand_node():
 
             print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
             transformation = llm.inject_bias_llm(parent_prompt, bias_type, model_id=model_id)
-            new_prompt = transformation['biased_prompt']
-            transformation_label = transformation['bias_added']
+            
+            # Handle multi-turn format: biased_prompt is the original prompt, conversation has the history
+            if transformation.get('multi_turn'):
+                # For multi-turn, the "biased prompt" is the original prompt (asked after priming)
+                new_prompt = transformation['biased_prompt']  # This is the original prompt
+                conversation = transformation.get('conversation', {})
+                # The LLM answer will be generated from the original prompt after priming
+                transformation_label = f"{transformation['bias_added']} (Multi-turn)"
+            else:
+                # Legacy single-turn format
+                new_prompt = transformation['biased_prompt']
+                transformation_label = transformation['bias_added']
+                conversation = None
+            
             node_type = 'biased'
 
         else:  # action == 'debias'
@@ -903,12 +915,25 @@ def graph_expand_node():
         print(f"✓ Transformed prompt ({len(new_prompt)} chars)")
 
         # Step 2: Generate LLM answer for the NEW prompt using selected model
-        try:
-            llm_answer = llm.generate_answer(new_prompt, model_id=model_id)
-            print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
-        except Exception as e:
-            print(f"Warning: Could not generate LLM answer: {e}")
-            llm_answer = f"[Error generating answer: {str(e)}]"
+        # For multi-turn bias injection, use the conversation response
+        if action == 'bias' and conversation and transformation.get('multi_turn'):
+            # Use the Turn 2 response from the multi-turn conversation
+            llm_answer = conversation.get('turn2_response', '')
+            if not llm_answer:
+                # Fallback: generate new answer
+                try:
+                    llm_answer = llm.generate_answer(new_prompt, model_id=model_id)
+                except Exception as e:
+                    llm_answer = f"[Error generating answer: {str(e)}]"
+            print(f"✓ Using multi-turn conversation response ({len(llm_answer)} chars)")
+        else:
+            # Standard single-turn: generate answer
+            try:
+                llm_answer = llm.generate_answer(new_prompt, model_id=model_id)
+                print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
+            except Exception as e:
+                print(f"Warning: Could not generate LLM answer: {e}")
+                llm_answer = f"[Error generating answer: {str(e)}]"
 
         # Step 3 & 4: Evaluate with HEARTS + Gemini/Claude
         use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
@@ -971,7 +996,10 @@ def graph_expand_node():
                 'bias_type': str(bias_type) if action == 'bias' and bias_type else None,
                 'method': str(debias_method) if action == 'debias' and debias_method else None,
                 'explanation': str(transformation.get('explanation', '')),
-                'framework': str(transformation.get('framework', ''))
+                'framework': str(transformation.get('framework', '')),
+                'multi_turn': transformation.get('multi_turn', False),
+                'conversation': conversation if conversation else None,
+                'target_group': transformation.get('target_group') if action == 'bias' else None
             },
 
             # HEARTS ML evaluation

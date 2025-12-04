@@ -1472,6 +1472,75 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                   {node.transformation_details.explanation}
                 </Typography>
               )}
+              {node.transformation_details.multi_turn && (
+                <Chip 
+                  label="Multi-Turn Injection" 
+                  size="small" 
+                  color="warning" 
+                  sx={{ mt: 1 }}
+                />
+              )}
+              {node.transformation_details.target_group && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Target Group: {node.transformation_details.target_group}
+                </Typography>
+              )}
+            </Paper>
+          </Box>
+        )}
+
+        {/* Multi-Turn Conversation History */}
+        {node.transformation_details?.conversation && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Multi-Turn Conversation History:
+            </Typography>
+            <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+              {/* Turn 1 - Priming Question */}
+              <Box sx={{ mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
+                  Turn 1: Priming Question
+                </Typography>
+                <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'background.paper' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    User:
+                  </Typography>
+                  <Typography variant="body2">
+                    {node.transformation_details.conversation.turn1_question}
+                  </Typography>
+                </Paper>
+                <Paper sx={{ p: 1.5, bgcolor: 'info.light', opacity: 0.8 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    Assistant:
+                  </Typography>
+                  <Typography variant="body2">
+                    {node.transformation_details.conversation.turn1_response}
+                  </Typography>
+                </Paper>
+              </Box>
+
+              {/* Turn 2 - Original Prompt */}
+              <Box>
+                <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
+                  Turn 2: Original Prompt (After Priming)
+                </Typography>
+                <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'background.paper' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    User:
+                  </Typography>
+                  <Typography variant="body2">
+                    {node.transformation_details.conversation.original_prompt}
+                  </Typography>
+                </Paper>
+                <Paper sx={{ p: 1.5, bgcolor: node.type === 'biased' ? 'error.light' : 'success.light', opacity: 0.8 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    Assistant (Primed Response):
+                  </Typography>
+                  <Typography variant="body2">
+                    {node.transformation_details.conversation.turn2_response}
+                  </Typography>
+                </Paper>
+              </Box>
             </Paper>
           </Box>
         )}

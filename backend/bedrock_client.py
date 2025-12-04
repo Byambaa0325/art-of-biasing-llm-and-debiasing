@@ -218,14 +218,24 @@ class BedrockClient:
         """
         model = model or self.default_model
 
+        # Build base payload
         payload = {
             "team_id": self.team_id,
             "api_token": self.api_token,
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            **kwargs
         }
+        
+        # Filter kwargs to only include supported parameters
+        # Some models may not support all parameters (e.g., temperature)
+        # We'll try to include them but the API will reject if not supported
+        # For now, we'll include common parameters and let the API validate
+        supported_params = ['temperature', 'top_p', 'top_k', 'stop_sequences', 'stream']
+        for key, value in kwargs.items():
+            if key in supported_params or key.startswith('_'):
+                # Include known parameters or internal parameters (prefixed with _)
+                payload[key] = value
 
         # Add optional parameters
         if tools:
@@ -235,8 +245,10 @@ class BedrockClient:
         if response_format:
             payload["response_format"] = response_format
 
-        # Retry logic
+        # Retry logic with parameter validation handling
         last_error = None
+        original_payload = payload.copy()
+        
         for attempt in range(self.max_retries):
             try:
                 response = requests.post(
@@ -248,6 +260,25 @@ class BedrockClient:
                 return self._handle_response(response)
 
             except BedrockAPIError as e:
+                # Handle parameter validation errors - retry without unsupported parameters
+                if e.status_code == 500 and 'extraneous key' in str(e.message).lower():
+                    # Extract the unsupported parameter from error message
+                    error_msg = str(e.message).lower()
+                    if 'temperature' in error_msg and 'temperature' in payload:
+                        # Remove temperature and retry
+                        payload.pop('temperature', None)
+                        print(f"Warning: Model {model} doesn't support temperature parameter, retrying without it")
+                        continue
+                    elif 'extraneous key' in error_msg:
+                        # Try to identify and remove the problematic parameter
+                        # This is a fallback for other unsupported parameters
+                        for param in ['temperature', 'top_p', 'top_k']:
+                            if param in payload and param in error_msg:
+                                payload.pop(param, None)
+                                print(f"Warning: Model {model} doesn't support {param} parameter, retrying without it")
+                                break
+                        continue
+                
                 # Don't retry on client errors (4xx except 429)
                 if 400 <= e.status_code < 500 and e.status_code != 429:
                     raise
@@ -255,6 +286,9 @@ class BedrockClient:
 
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    # Reset payload for final attempt
+                    payload = original_payload.copy()
 
             except requests.exceptions.RequestException as e:
                 last_error = BedrockAPIError(0, f"Request failed: {str(e)}")
