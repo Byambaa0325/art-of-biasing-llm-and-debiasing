@@ -1,0 +1,9 @@
+# ML dependencies (for HEARTS model - optional, heavy)
+# Only install if ENABLE_HEARTS=true
+transformers>=4.30.0
+torch>=2.0.0
+shap>=0.42.0
+lime>=0.2.0.1
+scikit-learn>=1.3.0
+numpy>=1.24.0
+

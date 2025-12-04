@@ -4,27 +4,49 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies (including Node.js for React build)
-RUN apt-get update && apt-get install -y \
+# Use --no-install-recommends to reduce package size
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     curl \
+    ca-certificates \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
+
+# Define build argument for optional HEARTS ML dependencies
+# Set to true to enable HEARTS model (adds ~2GB and significant build time)
+ARG ENABLE_HEARTS=false
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+# Install core dependencies first (faster, better caching)
+COPY requirements-core.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install core Python dependencies
+RUN pip install --no-cache-dir -r requirements-core.txt
+
+# Conditionally install ML dependencies (HEARTS) only if enabled
+# This saves significant build time if HEARTS is not needed
+COPY requirements-ml.txt .
+RUN if [ "$ENABLE_HEARTS" = "true" ]; then \
+        pip install --no-cache-dir -r requirements-ml.txt; \
+    else \
+        echo "Skipping HEARTS ML dependencies (set ENABLE_HEARTS=true to enable)"; \
+    fi
 
 # Build React frontend (needs dev dependencies for build)
 # Copy package files - npm install will regenerate package-lock.json if needed
 COPY frontend-react/package.json ./frontend-react/
 WORKDIR /app/frontend-react
-# Install all dependencies (including dev dependencies needed for build)
-# Delete package-lock.json if exists and do fresh install to avoid conflicts
-RUN rm -f package-lock.json && \
-    npm install && \
+# Install only production dependencies first, then dev dependencies for build
+# Use npm ci for faster, reliable installs if package-lock.json exists
+RUN if [ -f package-lock.json ]; then \
+        npm ci --include=dev; \
+    else \
+        npm install --include=dev; \
+    fi && \
     npm cache clean --force
 WORKDIR /app
 
@@ -33,16 +55,26 @@ COPY frontend-react/ ./frontend-react/
 WORKDIR /app/frontend-react
 # Build React app for production (outputs to build/ directory)
 # Set API URL to relative path since frontend and backend are on same domain
-RUN REACT_APP_API_URL=/api npm run build || (echo "Warning: React build failed, continuing without frontend" && mkdir -p build)
-# Clean up node_modules to reduce image size (build artifacts remain in build/)
-RUN rm -rf node_modules
+# Use --max_old_space_size to prevent OOM during build
+RUN NODE_OPTIONS="--max_old_space_size=2048" REACT_APP_API_URL=/api npm run build || \
+    (echo "Warning: React build failed, continuing without frontend" && mkdir -p build)
+# Clean up node_modules and npm cache to reduce image size
+RUN rm -rf node_modules \
+    && npm cache clean --force \
+    && rm -rf ~/.npm
 WORKDIR /app
 
-# Pre-download HEARTS model during build (bakes into image)
+# Pre-download HEARTS model during build (only if HEARTS is enabled)
 # This prevents downloading on every Cloud Run cold start
-RUN mkdir -p /app/.cache/huggingface && \
-    python -c "import os; os.environ['TRANSFORMERS_CACHE'] = '/app/.cache/huggingface'; from transformers import AutoTokenizer, AutoModelForSequenceClassification; tokenizer = AutoTokenizer.from_pretrained('holistic-ai/bias_classifier_albertv2'); model = AutoModelForSequenceClassification.from_pretrained('holistic-ai/bias_classifier_albertv2'); print('✓ HEARTS model downloaded')" || \
-    echo "Warning: HEARTS model download failed, will download on first use"
+# Skip this step if HEARTS is disabled to save build time
+RUN if [ "$ENABLE_HEARTS" = "true" ]; then \
+        mkdir -p /app/.cache/huggingface && \
+        python -c "import os; os.environ['TRANSFORMERS_CACHE'] = '/app/.cache/huggingface'; from transformers import AutoTokenizer, AutoModelForSequenceClassification; tokenizer = AutoTokenizer.from_pretrained('holistic-ai/bias_classifier_albertv2'); model = AutoModelForSequenceClassification.from_pretrained('holistic-ai/bias_classifier_albertv2'); print('✓ HEARTS model downloaded')" || \
+        echo "Warning: HEARTS model download failed, will download on first use"; \
+    else \
+        echo "Skipping HEARTS model download (set ENABLE_HEARTS=true to enable)"; \
+        mkdir -p /app/.cache/huggingface; \
+    fi
 
 # Copy application code
 COPY backend/ ./backend/
@@ -60,8 +92,7 @@ ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 # Expose port (Cloud Run uses PORT env var)
 EXPOSE 8080
 
-# Use gunicorn for production
-RUN pip install gunicorn
+# Gunicorn is already in requirements-core.txt, no need to install again
 
 # Create non-root user for security and ensure cache and build are accessible
 RUN useradd -m -u 1000 appuser && \

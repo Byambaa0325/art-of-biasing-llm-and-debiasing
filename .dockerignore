@@ -1,21 +1,79 @@
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-env/
-.venv
-*.log
+# Git
 .git
 .gitignore
-README.md
+.gitattributes
+
+# Documentation
 *.md
-frontend/
+docs/
+README*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
 node_modules/
-.env
-.env.local
-.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files (will be copied separately if needed)
+.env.local
+.env.development
+.env.test
+
+# Test files
+test_*.py
+*_test.py
+tests/
+
+# Build artifacts
+frontend-react/build/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Deployment scripts (not needed in image)
+deploy-*.sh
+deploy-*.ps1
+cloudbuild*.yaml
+app*.yaml
+
+# Large model files (will be downloaded during build if needed)
+*.bin
+*.safetensors
+models/
+
+# Cache directories
+.cache/
+.huggingface/
