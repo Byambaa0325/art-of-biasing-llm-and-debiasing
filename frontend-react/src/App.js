@@ -261,7 +261,7 @@ function App() {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/graph/expand`,
-        { prompt: prompt.trim() },
+        { prompt: prompt.trim(), model_id: selectedModel },
         getAxiosConfig(apiKey)
       );
 

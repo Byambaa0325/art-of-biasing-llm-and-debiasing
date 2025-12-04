@@ -79,6 +79,268 @@ AVAILABLE_MODELS = {
         'recommended_for': ['generation', 'evaluation'],
         'endpoint_type': 'vertex_sdk'
     },
+
+    # AWS Bedrock - Anthropic Claude Series
+    'us.anthropic.claude-3-5-sonnet-20241022-v2:0': {
+        'name': 'Claude 3.5 Sonnet v2',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Claude 3.5 Sonnet, excellent for reasoning and evaluation',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-3-5-haiku-20241022-v1:0': {
+        'name': 'Claude 3.5 Haiku',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Fast Claude 3.5 model, great for quick tasks',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-3-opus-20240229-v1:0': {
+        'name': 'Claude 3 Opus',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Most capable Claude 3 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-3-sonnet-20240229-v1:0': {
+        'name': 'Claude 3 Sonnet',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Balanced Claude 3 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-3-haiku-20240307-v1:0': {
+        'name': 'Claude 3 Haiku',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Fast Claude 3 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-opus-4-20250514-v1:0': {
+        'name': 'Claude Opus 4',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Claude Opus 4 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-sonnet-4-20250514-v1:0': {
+        'name': 'Claude Sonnet 4',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Claude Sonnet 4 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-sonnet-4-5-20250929-v1:0': {
+        'name': 'Claude Sonnet 4.5',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Claude Sonnet 4.5 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.anthropic.claude-haiku-4-5-20251001-v1:0': {
+        'name': 'Claude Haiku 4.5',
+        'provider': 'Anthropic (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Claude Haiku 4.5 model',
+        'context_window': 200000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+
+    # AWS Bedrock - Meta Llama Series
+    'us.meta.llama3-2-90b-instruct-v1:0': {
+        'name': 'Llama 3.2 90B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Large Llama 3.2 model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-2-11b-instruct-v1:0': {
+        'name': 'Llama 3.2 11B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Medium Llama 3.2 model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-2-3b-instruct-v1:0': {
+        'name': 'Llama 3.2 3B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Small Llama 3.2 model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-2-1b-instruct-v1:0': {
+        'name': 'Llama 3.2 1B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Tiny Llama 3.2 model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-1-70b-instruct-v1:0': {
+        'name': 'Llama 3.1 70B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Llama 3.1 70B model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-1-8b-instruct-v1:0': {
+        'name': 'Llama 3.1 8B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Llama 3.1 8B model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama3-3-70b-instruct-v1:0': {
+        'name': 'Llama 3.3 70B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Latest Llama 3.3 70B model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama4-scout-17b-instruct-v1:0': {
+        'name': 'Llama 4 Scout 17B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Llama 4 Scout model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.meta.llama4-maverick-17b-instruct-v1:0': {
+        'name': 'Llama 4 Maverick 17B',
+        'provider': 'Meta (Bedrock)',
+        'category': 'both',
+        'description': 'Llama 4 Maverick model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+
+    # AWS Bedrock - Amazon Nova Series
+    'us.amazon.nova-premier-v1:0': {
+        'name': 'Nova Premier',
+        'provider': 'Amazon (Bedrock)',
+        'category': 'both',
+        'description': 'Amazon\'s premier model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.amazon.nova-pro-v1:0': {
+        'name': 'Nova Pro',
+        'provider': 'Amazon (Bedrock)',
+        'category': 'both',
+        'description': 'Amazon\'s pro model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.amazon.nova-lite-v1:0': {
+        'name': 'Nova Lite',
+        'provider': 'Amazon (Bedrock)',
+        'category': 'both',
+        'description': 'Amazon\'s lite model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'us.amazon.nova-micro-v1:0': {
+        'name': 'Nova Micro',
+        'provider': 'Amazon (Bedrock)',
+        'category': 'both',
+        'description': 'Amazon\'s micro model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+
+    # AWS Bedrock - Mistral Series
+    'us.mistral.pixtral-large-2502-v1:0': {
+        'name': 'Pixtral Large',
+        'provider': 'Mistral (Bedrock)',
+        'category': 'both',
+        'description': 'Mistral\'s large vision model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'mistral.mistral-large-2402-v1:0': {
+        'name': 'Mistral Large',
+        'provider': 'Mistral (Bedrock)',
+        'category': 'both',
+        'description': 'Mistral\'s large model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'mistral.mistral-small-2402-v1:0': {
+        'name': 'Mistral Small',
+        'provider': 'Mistral (Bedrock)',
+        'category': 'both',
+        'description': 'Mistral\'s small model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'mistral.mistral-7b-instruct-v0:2': {
+        'name': 'Mistral 7B',
+        'provider': 'Mistral (Bedrock)',
+        'category': 'both',
+        'description': 'Mistral 7B model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+    'mistral.mixtral-8x7b-instruct-v0:1': {
+        'name': 'Mixtral 8x7B',
+        'provider': 'Mistral (Bedrock)',
+        'category': 'both',
+        'description': 'Mixtral 8x7B model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
+
+    # AWS Bedrock - DeepSeek Series
+    'us.deepseek.r1-v1:0': {
+        'name': 'DeepSeek R1',
+        'provider': 'DeepSeek (Bedrock)',
+        'category': 'both',
+        'description': 'DeepSeek R1 reasoning model',
+        'context_window': 128000,
+        'recommended_for': ['generation', 'evaluation'],
+        'endpoint_type': 'bedrock'
+    },
 }
 
 # Default models for each purpose

@@ -1,0 +1,19 @@
+# App Engine configuration for Bedrock Integration Branch (alternative to Cloud Run)
+runtime: python311
+
+env_variables:
+  GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+  GCP_LOCATION: us-central1
+  # Bedrock credentials - set these in App Engine environment variables
+  # BEDROCK_TEAM_ID: your_team_id
+  # BEDROCK_API_TOKEN: your_api_token
+  # BEDROCK_API_ENDPOINT: https://ctwa92wg1b.execute-api.us-east-1.amazonaws.com/prod/invoke
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+
+resources:
+  cpu: 2
+  memory_gb: 4  # Increased from 2GB to 4GB for HEARTS model (~500MB) + headroom
+

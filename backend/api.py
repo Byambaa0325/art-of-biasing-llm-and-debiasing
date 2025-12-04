@@ -20,7 +20,7 @@ import uuid
 import json
 import gc
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from pathlib import Path
 
 # Handle imports for both local development and production (gunicorn)
@@ -91,6 +91,21 @@ except ImportError:
         VERTEX_LLM_AVAILABLE = False
         print(f"Vertex AI LLM service not available: {e}")
         print("To enable LLM features, set GOOGLE_CLOUD_PROJECT")
+
+# Bedrock LLM service (for AWS Bedrock)
+try:
+    # Try relative import first (for gunicorn)
+    from .bedrock_llm_service import get_bedrock_llm_service
+    BEDROCK_LLM_AVAILABLE = True
+except ImportError:
+    try:
+        # Fallback to absolute import (for local development)
+        from bedrock_llm_service import get_bedrock_llm_service
+        BEDROCK_LLM_AVAILABLE = True
+    except Exception as e:
+        BEDROCK_LLM_AVAILABLE = False
+        print(f"Bedrock LLM service not available: {e}")
+        print("To enable Bedrock features, configure .env.bedrock")
 
 def sanitize_for_json(obj: Any) -> Any:
     """
@@ -177,14 +192,38 @@ def get_bias_aggregator():
     """
     return bias_aggregator
 
-# Set LLM_AVAILABLE based on Vertex AI availability
-LLM_AVAILABLE = VERTEX_LLM_AVAILABLE
+# Set LLM_AVAILABLE based on available services
+LLM_AVAILABLE = VERTEX_LLM_AVAILABLE or BEDROCK_LLM_AVAILABLE
 
-def get_llm_service():
-    """Get LLM service (Vertex AI)"""
-    if not VERTEX_LLM_AVAILABLE:
-        raise Exception("Vertex AI LLM service not available")
-    return get_vertex_llm_service()
+def get_llm_service(model_id: Optional[str] = None):
+    """
+    Get appropriate LLM service based on model_id.
+    
+    Args:
+        model_id: Optional model ID to determine which service to use
+        
+    Returns:
+        LLM service instance (Vertex or Bedrock)
+    """
+    # If model_id is provided, check if it's a Bedrock model
+    if model_id:
+        try:
+            from model_config import get_model_info
+            model_info = get_model_info(model_id)
+            if model_info and model_info.get('endpoint_type') == 'bedrock':
+                if not BEDROCK_LLM_AVAILABLE:
+                    raise Exception("Bedrock LLM service not available. Configure .env.bedrock")
+                return get_bedrock_llm_service(default_model=model_id)
+        except Exception as e:
+            print(f"Warning: Could not determine model type: {e}")
+    
+    # Default to Vertex AI if available, otherwise Bedrock
+    if VERTEX_LLM_AVAILABLE:
+        return get_vertex_llm_service()
+    elif BEDROCK_LLM_AVAILABLE:
+        return get_bedrock_llm_service()
+    else:
+        raise Exception("No LLM service available. Configure Vertex AI or Bedrock.")
 
 
 # Memory management: Force garbage collection after every request
@@ -590,28 +629,30 @@ def graph_expand():
             return jsonify({'error': 'No JSON data provided'}), 400
 
         prompt = data.get('prompt', '')
+        model_id = data.get('model_id')  # Get selected model
         if not prompt:
             return jsonify({'error': 'No prompt provided'}), 400
 
         # Generate unique ID for this node
         node_id = str(uuid.uuid4())
 
-        # Step 1: Generate LLM answer for the prompt
+        # Step 1: Generate LLM answer for the prompt using selected model
         llm_answer = None
-        if VERTEX_LLM_AVAILABLE:
+        if LLM_AVAILABLE:
             try:
-                llm = get_vertex_llm_service()
-                llm_answer = llm.generate_answer(prompt)
+                llm = get_llm_service(model_id=model_id)
+                llm_answer = llm.generate_answer(prompt, model_id=model_id)
                 print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
             except Exception as e:
                 print(f"Warning: Could not generate LLM answer: {e}")
                 llm_answer = f"[Error generating answer: {str(e)}]"
         else:
-            llm_answer = "[LLM not available - configure Vertex AI]"
+            llm_answer = "[LLM not available - configure Vertex AI or Bedrock]"
 
-        # Step 2: Multi-layer bias detection (HEARTS + Gemini)
+        # Step 2: Multi-layer bias detection (HEARTS + Gemini/Claude)
         use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
         use_gemini = VERTEX_LLM_AVAILABLE
+        use_claude = BEDROCK_LLM_AVAILABLE
 
         if use_hearts:
             try:
@@ -630,6 +671,17 @@ def graph_expand():
         else:
             # Rule-based only
             detected_biases = bias_detector.detect_biases(prompt)
+
+        # Step 2.5: Add Claude bias evaluation if available
+        claude_evaluation = None
+        if use_claude:
+            try:
+                llm = get_llm_service(model_id=model_id)
+                if hasattr(llm, 'evaluate_bias'):
+                    claude_evaluation = llm.evaluate_bias(prompt)
+                    print(f"✓ Claude bias evaluation complete")
+            except Exception as e:
+                print(f"Warning: Claude evaluation failed: {e}")
 
         # Step 3: Build node with structured evaluations
         hearts_data = detected_biases.get('hearts', {}) if isinstance(detected_biases.get('hearts'), dict) else {}
@@ -675,6 +727,19 @@ def graph_expand():
                 'explanation': str(gemini_data.get('evaluation', {}).get('explanation', '')) if gemini_data else None,
                 'recommendations': str(gemini_data.get('evaluation', {}).get('recommendations', '')) if gemini_data else None,
                 'model': 'Gemini 2.5 Flash' if gemini_data else None
+            },
+
+            # Claude LLM evaluation (zero-shot)
+            'claude_evaluation': {
+                'available': bool(claude_evaluation),
+                'bias_score': float(claude_evaluation.get('evaluation', {}).get('overall_bias_score', 0)) if claude_evaluation else None,
+                'severity': str(claude_evaluation.get('evaluation', {}).get('severity', 'unknown')) if claude_evaluation else None,
+                'bias_types': list(claude_evaluation.get('evaluation', {}).get('detected_bias_types', [])) if claude_evaluation else [],
+                'bias_scores': dict(claude_evaluation.get('evaluation', {}).get('bias_scores', {})) if claude_evaluation else {},
+                'explanation': str(claude_evaluation.get('evaluation', {}).get('explanation', '')) if claude_evaluation else None,
+                'recommendations': str(claude_evaluation.get('evaluation', {}).get('recommendations', '')) if claude_evaluation else None,
+                'model': claude_evaluation.get('model', 'Claude') if claude_evaluation else None,
+                'method': claude_evaluation.get('method', 'Zero-shot') if claude_evaluation else None
             },
 
             # Bias metrics from individual judges (not aggregated)
@@ -809,10 +874,10 @@ def graph_expand_node():
         if not parent_prompt or not parent_id:
             return jsonify({'error': 'Missing node_id or prompt'}), 400
 
-        if not VERTEX_LLM_AVAILABLE:
-            return jsonify({'error': 'Vertex AI not available. Configure Google Cloud.'}), 503
+        if not LLM_AVAILABLE:
+            return jsonify({'error': 'LLM service not available. Configure Vertex AI or Bedrock.'}), 503
 
-        llm = get_vertex_llm_service()
+        llm = get_llm_service(model_id=model_id)
 
         # Step 1: Transform prompt using LLM with instructions
         if action == 'bias':
@@ -837,16 +902,17 @@ def graph_expand_node():
 
         print(f"✓ Transformed prompt ({len(new_prompt)} chars)")
 
-        # Step 2: Generate LLM answer for the NEW prompt
+        # Step 2: Generate LLM answer for the NEW prompt using selected model
         try:
-            llm_answer = llm.generate_answer(new_prompt)
+            llm_answer = llm.generate_answer(new_prompt, model_id=model_id)
             print(f"✓ Generated LLM answer ({len(llm_answer)} chars)")
         except Exception as e:
             print(f"Warning: Could not generate LLM answer: {e}")
             llm_answer = f"[Error generating answer: {str(e)}]"
 
-        # Step 3 & 4: Evaluate with HEARTS + Gemini
+        # Step 3 & 4: Evaluate with HEARTS + Gemini/Claude
         use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
+        use_claude = BEDROCK_LLM_AVAILABLE
 
         if use_hearts:
             try:
@@ -863,6 +929,16 @@ def graph_expand_node():
                 use_hearts = False
         else:
             detected_biases = bias_detector.detect_biases(new_prompt)
+
+        # Add Claude bias evaluation if available
+        claude_evaluation = None
+        if use_claude:
+            try:
+                if hasattr(llm, 'evaluate_bias'):
+                    claude_evaluation = llm.evaluate_bias(new_prompt)
+                    print(f"✓ Claude bias evaluation complete")
+            except Exception as e:
+                print(f"Warning: Claude evaluation failed: {e}")
 
         # Build new node with structured evaluations
         new_id = str(uuid.uuid4())
@@ -918,6 +994,19 @@ def graph_expand_node():
                 'explanation': str(gemini_data.get('evaluation', {}).get('explanation', '')) if gemini_data else None,
                 'recommendations': str(gemini_data.get('evaluation', {}).get('recommendations', '')) if gemini_data else None,
                 'model': 'Gemini 2.5 Flash' if gemini_data else None
+            },
+
+            # Claude LLM evaluation (zero-shot)
+            'claude_evaluation': {
+                'available': bool(claude_evaluation),
+                'bias_score': float(claude_evaluation.get('evaluation', {}).get('overall_bias_score', 0)) if claude_evaluation else None,
+                'severity': str(claude_evaluation.get('evaluation', {}).get('severity', 'unknown')) if claude_evaluation else None,
+                'bias_types': list(claude_evaluation.get('evaluation', {}).get('detected_bias_types', [])) if claude_evaluation else [],
+                'bias_scores': dict(claude_evaluation.get('evaluation', {}).get('bias_scores', {})) if claude_evaluation else {},
+                'explanation': str(claude_evaluation.get('evaluation', {}).get('explanation', '')) if claude_evaluation else None,
+                'recommendations': str(claude_evaluation.get('evaluation', {}).get('recommendations', '')) if claude_evaluation else None,
+                'model': claude_evaluation.get('model', 'Claude') if claude_evaluation else None,
+                'method': claude_evaluation.get('method', 'Zero-shot') if claude_evaluation else None
             },
 
             # Bias metrics from individual judges (not aggregated)
