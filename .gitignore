@@ -20,9 +20,11 @@ ENV/
 .env.local
 .env.production
 .env.development
+.env.bedrock
 
 # But keep example files
 !.env.example
+!.env.bedrock.example
 
 # OS
 .DS_Store

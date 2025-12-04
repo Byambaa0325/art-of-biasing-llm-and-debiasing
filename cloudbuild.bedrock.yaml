@@ -31,9 +31,13 @@ steps:
       - '10'
       - '--set-env-vars'
       - 'GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_LOCATION=us-central1'
-      # Note: Bedrock credentials should be set via Secret Manager or Cloud Run environment variables
-      # For security, use: --set-secrets=BEDROCK_TEAM_ID=bedrock-team-id:latest,BEDROCK_API_TOKEN=bedrock-api-token:latest
-      # Or set via: --set-env-vars=BEDROCK_TEAM_ID=xxx,BEDROCK_API_TOKEN=xxx (less secure)
+      # Note: Bedrock credentials should be set AFTER deployment via:
+      # Option 1 (Recommended): Secret Manager
+      #   gcloud run services update bias-analysis-tool-bedrock --region=us-central1 \
+      #     --set-secrets="BEDROCK_TEAM_ID=bedrock-team-id:latest,BEDROCK_API_TOKEN=bedrock-api-token:latest"
+      # Option 2: Environment variables (less secure)
+      #   gcloud run services update bias-analysis-tool-bedrock --region=us-central1 \
+      #     --set-env-vars="BEDROCK_TEAM_ID=xxx,BEDROCK_API_TOKEN=xxx,BEDROCK_API_ENDPOINT=https://ctwa92wg1b.execute-api.us-east-1.amazonaws.com/prod/invoke"
 
 images:
   - 'gcr.io/$PROJECT_ID/bias-analysis-tool-bedrock'
