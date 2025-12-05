@@ -419,8 +419,8 @@ function App() {
     setLoading(true);
     try {
       // Get parent node to extract conversation history
-      const currentNodes = nodesRef.current;
-      const parentNode = currentNodes.find(n => n.id === parentNodeId);
+      let currentNodes = nodesRef.current;
+      let parentNode = currentNodes.find(n => n.id === parentNodeId);
       
       // Extract parent conversation history if it exists (for multi-turn bias injection)
       let parentConversation = null;
@@ -464,11 +464,11 @@ function App() {
       console.log('Actual edges:', actualEdges.length);
       console.log('Potential paths:', potentialPaths.length);
 
-      // Get current nodes and find the potential node to replace
-      const currentNodes = nodesRef.current;
+      // Refresh current nodes and find the potential node to replace
+      currentNodes = nodesRef.current;
       const currentEdges = edges;
       const potentialNode = currentNodes.find(n => n.id === potentialNodeId);
-      const parentNode = currentNodes.find(n => n.id === parentNodeId);
+      parentNode = currentNodes.find(n => n.id === parentNodeId);
 
       // Use the position and metadata of the potential node
       const actualNodePosition = potentialNode?.position || parentNode?.position || { x: LAYOUT_CONFIG.centerX, y: LAYOUT_CONFIG.centerY };
