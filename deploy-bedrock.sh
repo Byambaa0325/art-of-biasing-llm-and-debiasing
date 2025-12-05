@@ -93,3 +93,4 @@ echo -e "${GREEN}✓ Deployment complete!${NC}"
 echo -e "${GREEN}Service URL: ${SERVICE_URL}${NC}"
 echo -e "${YELLOW}Note: Make sure to set Bedrock credentials via Secret Manager or environment variables${NC}"
 
+

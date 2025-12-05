@@ -17,3 +17,4 @@ resources:
   cpu: 2
   memory_gb: 4  # Increased from 2GB to 4GB for HEARTS model (~500MB) + headroom
 
+

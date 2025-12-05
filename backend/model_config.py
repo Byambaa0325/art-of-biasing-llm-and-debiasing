@@ -446,28 +446,44 @@ def get_model_for_ui() -> List[Dict[str, Any]]:
 
 
 def get_generation_models() -> List[Dict[str, str]]:
-    """Get list of models suitable for generation (bias injection, debiasing)."""
+    """Get list of models suitable for generation (bias injection, debiasing).
+    
+    Excludes Vertex AI models (openapi, vertex_sdk endpoint types).
+    Only includes Bedrock models.
+    """
     models = []
     for model_id, config in AVAILABLE_MODELS.items():
+        # Only include models that support generation AND are not Vertex AI models
         if 'generation' in config['recommended_for']:
-            models.append({
-                'id': model_id,
-                'name': config['name'],
-                'provider': config['provider'],
-                'description': config['description']
-            })
+            endpoint_type = config.get('endpoint_type', '')
+            # Exclude Vertex AI models (openapi and vertex_sdk)
+            if endpoint_type not in ['openapi', 'vertex_sdk']:
+                models.append({
+                    'id': model_id,
+                    'name': config['name'],
+                    'provider': config['provider'],
+                    'description': config['description']
+                })
     return models
 
 
 def get_evaluation_models() -> List[Dict[str, str]]:
-    """Get list of models suitable for evaluation."""
+    """Get list of models suitable for evaluation.
+    
+    Excludes Vertex AI models (openapi, vertex_sdk endpoint types).
+    Only includes Bedrock models.
+    """
     models = []
     for model_id, config in AVAILABLE_MODELS.items():
+        # Only include models that support evaluation AND are not Vertex AI models
         if 'evaluation' in config['recommended_for']:
-            models.append({
-                'id': model_id,
-                'name': config['name'],
-                'provider': config['provider'],
-                'description': config['description']
-            })
+            endpoint_type = config.get('endpoint_type', '')
+            # Exclude Vertex AI models (openapi and vertex_sdk)
+            if endpoint_type not in ['openapi', 'vertex_sdk']:
+                models.append({
+                    'id': model_id,
+                    'name': config['name'],
+                    'provider': config['provider'],
+                    'description': config['description']
+                })
     return models

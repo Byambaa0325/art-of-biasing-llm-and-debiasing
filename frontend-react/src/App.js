@@ -418,6 +418,16 @@ function App() {
     setExpandingNodeId(potentialNodeId);
     setLoading(true);
     try {
+      // Get parent node to extract conversation history
+      const currentNodes = nodesRef.current;
+      const parentNode = currentNodes.find(n => n.id === parentNodeId);
+      
+      // Extract parent conversation history if it exists (for multi-turn bias injection)
+      let parentConversation = null;
+      if (parentNode?.data?.transformation_details?.conversation) {
+        parentConversation = parentNode.data.transformation_details.conversation;
+      }
+
       const payload = {
         node_id: parentNodeId,
         prompt: parentPrompt,
@@ -428,6 +438,10 @@ function App() {
       // Add specific params based on action type
       if (pathData.type === 'bias') {
         payload.bias_type = pathData.bias_type;
+        // Include parent conversation for bias injection (to prepend new turns)
+        if (parentConversation) {
+          payload.parent_conversation = parentConversation;
+        }
       } else {
         payload.method = pathData.method;
       }
@@ -922,6 +936,42 @@ function App() {
 
       {/* Full Screen Graph */}
       <Box sx={{ flex: 1, position: 'relative' }}>
+        {/* Global loading overlay when any node is expanding */}
+        {expandingNodeId && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              bgcolor: 'rgba(0, 0, 0, 0.02)',
+              zIndex: 10,
+              pointerEvents: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Paper
+              sx={{
+                p: 2,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 1,
+                bgcolor: 'background.paper',
+                boxShadow: 3,
+              }}
+            >
+              <CircularProgress size={32} />
+              <Typography variant="body2" color="text.secondary">
+                Expanding node...
+              </Typography>
+            </Paper>
+          </Box>
+        )}
+        
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -931,9 +981,9 @@ function App() {
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           fitView
-          nodesDraggable={true}
+          nodesDraggable={!expandingNodeId}
           nodesConnectable={false}
-          elementsSelectable={true}
+          elementsSelectable={!expandingNodeId}
         >
           <Background />
           <Controls />
@@ -968,9 +1018,18 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
           textAlign: 'center',
           cursor: isDisabled ? 'wait' : 'pointer',
           overflow: 'hidden',
-          opacity: isDisabled ? 0.5 : 1,
+          opacity: isDisabled ? 0.6 : 1,
           pointerEvents: isDisabled ? 'none' : 'auto',
-          transition: 'opacity 0.2s',
+          transition: 'all 0.2s',
+          position: 'relative',
+          // Add pulsing animation when expanding
+          ...(isExpanding && {
+            animation: 'pulse 2s ease-in-out infinite',
+            '@keyframes pulse': {
+              '0%, 100%': { opacity: 0.6 },
+              '50%': { opacity: 0.8 },
+            },
+          }),
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -979,6 +1038,38 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
           }
         }}
       >
+        {/* Loading overlay when expanding */}
+        {isExpanding && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              bgcolor: 'rgba(255, 255, 255, 0.8)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1,
+              borderRadius: 1,
+            }}
+          >
+            <CircularProgress size={24} sx={{ mb: 1 }} />
+            <Typography
+              variant="caption"
+              sx={{
+                fontSize: '10px',
+                fontWeight: 'bold',
+                color: 'primary.main',
+              }}
+            >
+              Expanding...
+            </Typography>
+          </Box>
+        )}
+        
         <Typography
           variant="caption"
           sx={{
@@ -989,6 +1080,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            opacity: isExpanding ? 0.3 : 1,
           }}
         >
           {node.prompt}
@@ -997,14 +1089,15 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
           variant="caption"
           sx={{
             fontSize: '9px',
-            color: 'text.secondary',
+            color: isExpanding ? 'primary.main' : 'text.secondary',
             display: 'block',
+            fontWeight: isExpanding ? 'bold' : 'normal',
           }}
         >
           {isExpanding ? 'Expanding...' : isAnyExpanding ? 'Please wait...' : 'Click to expand'}
         </Typography>
-        {isExpanding && (
-          <CircularProgress size={16} sx={{ mt: 0.5 }} />
+        {!isExpanding && isAnyExpanding && (
+          <CircularProgress size={12} sx={{ mt: 0.5, opacity: 0.5 }} />
         )}
         {node.description && (
           <Typography
@@ -1020,6 +1113,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
               display: '-webkit-box',
               WebkitLineClamp: 2,
               WebkitBoxOrient: 'vertical',
+              opacity: isExpanding ? 0.3 : 1,
             }}
           >
             {node.description}
@@ -1494,12 +1588,62 @@ function NodeDialog({ open, onClose, node, evaluating }) {
           <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               Multi-Turn Conversation History:
+              {node.transformation_details.conversation.bias_count > 1 && (
+                <Chip 
+                  label={`${node.transformation_details.conversation.bias_count} Bias Injections`} 
+                  size="small" 
+                  color="warning" 
+                  sx={{ ml: 1 }}
+                />
+              )}
             </Typography>
             <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
-              {/* Turn 1 - Priming Question */}
+              {/* Render previous conversations if they exist */}
+              {node.transformation_details.conversation.previous_conversation && (
+                <Box sx={{ mb: 3, pb: 2, borderBottom: '2px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
+                    Previous Bias Injections:
+                  </Typography>
+                  {(() => {
+                    const renderConversation = (conv, level = 0) => {
+                      if (!conv) return null;
+                      
+                      return (
+                        <Box key={level} sx={{ ml: level * 2, mb: 2 }}>
+                          {conv.previous_conversation && renderConversation(conv.previous_conversation, level + 1)}
+                          <Box sx={{ mb: 1, p: 1, bgcolor: 'background.paper', borderRadius: 1 }}>
+                            <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>
+                              Bias Injection #{level + 1}
+                            </Typography>
+                            {conv.turn1_question && (
+                              <Box sx={{ mb: 1 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>
+                                  Q: {conv.turn1_question.substring(0, 100)}...
+                                </Typography>
+                              </Box>
+                            )}
+                            {conv.original_prompt && (
+                              <Box>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '10px' }}>
+                                  Prompt: {conv.original_prompt.substring(0, 100)}...
+                                </Typography>
+                              </Box>
+                            )}
+                          </Box>
+                        </Box>
+                      );
+                    };
+                    return renderConversation(node.transformation_details.conversation.previous_conversation);
+                  })()}
+                </Box>
+              )}
+
+              {/* Current Turn 1 - Priming Question */}
               <Box sx={{ mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
-                  Turn 1: Priming Question
+                  {node.transformation_details.conversation.bias_count > 1 
+                    ? `Turn ${(node.transformation_details.conversation.bias_count - 1) * 2 + 1}: Additional Priming Question`
+                    : 'Turn 1: Priming Question'}
                 </Typography>
                 <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'background.paper' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -1519,10 +1663,12 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                 </Paper>
               </Box>
 
-              {/* Turn 2 - Original Prompt */}
+              {/* Current Turn 2 - Original Prompt */}
               <Box>
                 <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
-                  Turn 2: Original Prompt (After Priming)
+                  {node.transformation_details.conversation.bias_count > 1 
+                    ? `Turn ${node.transformation_details.conversation.bias_count * 2}: Original Prompt (After All Priming)`
+                    : 'Turn 2: Original Prompt (After Priming)'}
                 </Typography>
                 <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'background.paper' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>

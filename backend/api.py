@@ -870,6 +870,8 @@ def graph_expand_node():
         bias_type = data.get('bias_type')  # For bias actions
         debias_method = data.get('method')  # For debias actions
         model_id = data.get('model_id')  # Optional model ID
+        # Get existing conversation history from parent node (if it exists)
+        parent_conversation = data.get('parent_conversation')  # Optional: existing conversation from parent
 
         if not parent_prompt or not parent_id:
             return jsonify({'error': 'Missing node_id or prompt'}), 400
@@ -885,7 +887,13 @@ def graph_expand_node():
                 return jsonify({'error': 'Missing bias_type for bias action'}), 400
 
             print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
-            transformation = llm.inject_bias_llm(parent_prompt, bias_type, model_id=model_id)
+            # Pass existing conversation to prepend new bias injection turns
+            transformation = llm.inject_bias_llm(
+                parent_prompt, 
+                bias_type, 
+                model_id=model_id,
+                existing_conversation=parent_conversation
+            )
             
             # Handle multi-turn format: biased_prompt is the original prompt, conversation has the history
             if transformation.get('multi_turn'):

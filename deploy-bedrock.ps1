@@ -82,3 +82,4 @@ Write-Host "✓ Deployment complete!" -ForegroundColor Green
 Write-Host "Service URL: $SERVICE_URL" -ForegroundColor Green
 Write-Host "Note: Make sure to set Bedrock credentials via Secret Manager or environment variables" -ForegroundColor Yellow
 
+

@@ -15,3 +15,4 @@ google-auth-httplib2>=0.1.1
 # Bedrock API Integration
 pydantic>=2.0.0
 
+
