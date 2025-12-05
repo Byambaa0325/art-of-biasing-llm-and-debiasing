@@ -207,10 +207,13 @@ class BedrockLLMService:
         """
         model = model_id or self.default_model
         
-        system_prompt = "You are a helpful assistant. Provide clear, accurate, and concise answers."
+        system_prompt = "You are a helpful assistant. Provide clear, accurate, and concise answers. Always complete your response within 10 words."
+        
+        # Append instruction to the prompt to ensure the LLM follows it
+        prompt_with_instruction = f"{prompt}\n\nPlease complete your answer within 10 words."
         
         return self.generate(
-            prompt=prompt,
+            prompt=prompt_with_instruction,
             system_prompt=system_prompt,
             temperature=0.7,
             max_tokens=1024,

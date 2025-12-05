@@ -1201,10 +1201,11 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                 sx={{
                   display: 'block',
                   wordBreak: 'break-word',
+                  overflowWrap: 'break-word',
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {node.llm_answer}
+                {node.llm_answer || ''}
               </Typography>
             </Paper>
           )}
@@ -1649,16 +1650,34 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                     User:
                   </Typography>
-                  <Typography variant="body2">
-                    {node.transformation_details.conversation.turn1_question}
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                      maxHeight: '200px',
+                      overflow: 'auto'
+                    }}
+                  >
+                    {node.transformation_details.conversation.turn1_question || ''}
                   </Typography>
                 </Paper>
                 <Paper sx={{ p: 1.5, bgcolor: 'info.light', opacity: 0.8 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                     Assistant:
                   </Typography>
-                  <Typography variant="body2">
-                    {node.transformation_details.conversation.turn1_response}
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                      maxHeight: '200px',
+                      overflow: 'auto'
+                    }}
+                  >
+                    {node.transformation_details.conversation.turn1_response || ''}
                   </Typography>
                 </Paper>
               </Box>
@@ -1674,16 +1693,34 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                     User:
                   </Typography>
-                  <Typography variant="body2">
-                    {node.transformation_details.conversation.original_prompt}
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                      maxHeight: '200px',
+                      overflow: 'auto'
+                    }}
+                  >
+                    {node.transformation_details.conversation.original_prompt || ''}
                   </Typography>
                 </Paper>
                 <Paper sx={{ p: 1.5, bgcolor: node.type === 'biased' ? 'error.light' : 'success.light', opacity: 0.8 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                     Assistant (Primed Response):
                   </Typography>
-                  <Typography variant="body2">
-                    {node.transformation_details.conversation.turn2_response}
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                      maxHeight: '300px',
+                      overflow: 'auto'
+                    }}
+                  >
+                    {node.transformation_details.conversation.turn2_response || ''}
                   </Typography>
                 </Paper>
               </Box>

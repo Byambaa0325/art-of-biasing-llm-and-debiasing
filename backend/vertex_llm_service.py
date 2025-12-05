@@ -998,9 +998,13 @@ Score each category from 0 (no bias) to 1 (high bias). Be specific about which s
         Returns:
             LLM-generated answer
         """
-        default_system = "You are a helpful assistant. Provide clear, informative answers."
+        default_system = "You are a helpful assistant. Provide clear, informative answers. Always complete your response within 10 words."
+        
+        # Append instruction to the prompt to ensure the LLM follows it
+        prompt_with_instruction = f"{prompt}\n\nPlease complete your answer within 10 words."
+        
         return self.generate(
-            prompt,
+            prompt_with_instruction,
             system_prompt=system_prompt or default_system,
             temperature=0.7
         )
