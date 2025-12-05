@@ -418,16 +418,6 @@ function App() {
     setExpandingNodeId(potentialNodeId);
     setLoading(true);
     try {
-      // Get parent node to extract conversation history
-      let currentNodes = nodesRef.current;
-      let parentNode = currentNodes.find(n => n.id === parentNodeId);
-      
-      // Extract parent conversation history if it exists (for multi-turn bias injection)
-      let parentConversation = null;
-      if (parentNode?.data?.transformation_details?.conversation) {
-        parentConversation = parentNode.data.transformation_details.conversation;
-      }
-
       const payload = {
         node_id: parentNodeId,
         prompt: parentPrompt,
@@ -438,10 +428,8 @@ function App() {
       // Add specific params based on action type
       if (pathData.type === 'bias') {
         payload.bias_type = pathData.bias_type;
-        // Include parent conversation for bias injection (to prepend new turns)
-        if (parentConversation) {
-          payload.parent_conversation = parentConversation;
-        }
+        // Each node maintains its own separate conversation context
+        // Do NOT pass parent_conversation to ensure independence
       } else {
         payload.method = pathData.method;
       }
@@ -1574,11 +1562,6 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                   color="warning" 
                   sx={{ mt: 1 }}
                 />
-              )}
-              {node.transformation_details.target_group && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  Target Group: {node.transformation_details.target_group}
-                </Typography>
               )}
             </Paper>
           </Box>

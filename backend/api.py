@@ -870,8 +870,8 @@ def graph_expand_node():
         bias_type = data.get('bias_type')  # For bias actions
         debias_method = data.get('method')  # For debias actions
         model_id = data.get('model_id')  # Optional model ID
-        # Get existing conversation history from parent node (if it exists)
-        parent_conversation = data.get('parent_conversation')  # Optional: existing conversation from parent
+        # Note: Each node maintains its own separate conversation context
+        # We do NOT use parent_conversation to ensure node independence
 
         if not parent_prompt or not parent_id:
             return jsonify({'error': 'Missing node_id or prompt'}), 400
@@ -887,12 +887,13 @@ def graph_expand_node():
                 return jsonify({'error': 'Missing bias_type for bias action'}), 400
 
             print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
-            # Pass existing conversation to prepend new bias injection turns
+            # Each node starts with a fresh conversation context (no parent conversation)
+            # This ensures each node maintains its own separate conversation history
             transformation = llm.inject_bias_llm(
                 parent_prompt, 
                 bias_type, 
                 model_id=model_id,
-                existing_conversation=parent_conversation
+                existing_conversation=None  # Always start fresh for node independence
             )
             
             # Handle multi-turn format: biased_prompt is the original prompt, conversation has the history
@@ -1006,8 +1007,7 @@ def graph_expand_node():
                 'explanation': str(transformation.get('explanation', '')),
                 'framework': str(transformation.get('framework', '')),
                 'multi_turn': transformation.get('multi_turn', False),
-                'conversation': conversation if conversation else None,
-                'target_group': transformation.get('target_group') if action == 'bias' else None
+                'conversation': conversation if conversation else None
             },
 
             # HEARTS ML evaluation
