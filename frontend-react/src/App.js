@@ -22,16 +22,12 @@ import {
   DialogActions,
   CircularProgress,
   IconButton,
-  Tooltip,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
 } from '@mui/material';
 import {
-  AddCircle,
-  RemoveCircle,
-  Assessment,
   Info,
   Close,
 } from '@mui/icons-material';
@@ -452,11 +448,11 @@ function App() {
       console.log('Actual edges:', actualEdges.length);
       console.log('Potential paths:', potentialPaths.length);
 
-      // Refresh current nodes and find the potential node to replace
-      currentNodes = nodesRef.current;
+      // Get current nodes and find the potential node to replace
+      let currentNodes = nodesRef.current;
       const currentEdges = edges;
       const potentialNode = currentNodes.find(n => n.id === potentialNodeId);
-      parentNode = currentNodes.find(n => n.id === parentNodeId);
+      let parentNode = currentNodes.find(n => n.id === parentNodeId);
 
       // Use the position and metadata of the potential node
       const actualNodePosition = potentialNode?.position || parentNode?.position || { x: LAYOUT_CONFIG.centerX, y: LAYOUT_CONFIG.centerY };
@@ -1093,7 +1089,6 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
             sx={{
               fontSize: '8px',
               color: 'text.secondary',
-              display: 'block',
               mt: 0.5,
               fontStyle: 'italic',
               overflow: 'hidden',
@@ -1351,7 +1346,6 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                       variant="caption"
                       sx={{
                         fontSize: '8px',
-                        display: 'block',
                         mt: 0.5,
                         overflow: 'hidden',
                         display: '-webkit-box',
