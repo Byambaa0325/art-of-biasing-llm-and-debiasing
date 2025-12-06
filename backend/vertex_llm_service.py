@@ -951,11 +951,11 @@ Return only the debiased prompt, without explanation."""
     
     def evaluate_bias(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
         """
-        Use Gemini 2.5 Flash to evaluate bias in a prompt across multiple bias categories.
+        Use Gemini 2.5 Flash to evaluate bias in an LLM answer across multiple bias categories.
         
         Args:
-            prompt: Prompt to evaluate
-            context: Optional context about the prompt
+            prompt: LLM answer to evaluate (parameter name kept as 'prompt' for compatibility)
+            context: Optional context about the answer
             
         Returns:
             Dictionary with bias evaluation results including scores per bias type
@@ -963,9 +963,9 @@ Return only the debiased prompt, without explanation."""
         if not self.gemini_model:
             raise ValueError("Gemini model not available for evaluation")
         
-        evaluation_prompt = f"""Evaluate the following prompt for potential biases across multiple categories. 
+        evaluation_prompt = f"""Evaluate the following LLM answer for potential biases across multiple categories. 
 
-Prompt to evaluate: "{prompt}"
+Answer to evaluate: "{prompt}"
 
 {f'Context: {context}' if context else ''}
 

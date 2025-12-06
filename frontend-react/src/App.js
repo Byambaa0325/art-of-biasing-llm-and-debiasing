@@ -998,7 +998,6 @@ function App() {
 }
 
 function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt, onExpand, onInfo, isExpanding, isAnyExpanding }) {
-  const [showAnswer, setShowAnswer] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   // Potential node (dashed border) - clickable to expand
@@ -1164,48 +1163,35 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
         {node.prompt}
       </Typography>
 
-      {/* LLM Answer (Collapsible) */}
+      {/* LLM Answer */}
       {node.llm_answer && (
         <Box sx={{ mb: 1.5, width: '100%', overflow: 'hidden' }}>
-          <Button
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowAnswer(!showAnswer);
+          <Paper
+            sx={{
+              p: 1.5,
+              bgcolor: 'grey.50',
+              fontSize: '11px',
+              maxHeight: '200px',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              width: '100%',
+              boxSizing: 'border-box',
             }}
-            sx={{ fontSize: '10px', minHeight: 0, py: 0.5 }}
+            elevation={0}
           >
-            {showAnswer ? '▼ Hide' : '▶ Show'} LLM Answer
-          </Button>
-          {showAnswer && (
-            <Paper
+            <Typography
+              variant="body2"
               sx={{
-                mt: 1,
-                p: 1.5,
-                bgcolor: 'grey.50',
-                fontSize: '11px',
-                maxHeight: '200px',
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                width: '100%',
-                boxSizing: 'border-box',
+                display: 'block',
+                wordBreak: 'break-word',
+                overflowWrap: 'break-word',
+                whiteSpace: 'pre-wrap',
+                margin: 0,
               }}
-              elevation={0}
             >
-              <Typography
-                variant="body2"
-                sx={{
-                  display: 'block',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'break-word',
-                  whiteSpace: 'pre-wrap',
-                  margin: 0,
-                }}
-              >
-                {node.llm_answer || ''}
-              </Typography>
-            </Paper>
-          )}
+              {node.llm_answer || ''}
+            </Typography>
+          </Paper>
         </Box>
       )}
 

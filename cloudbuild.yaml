@@ -48,5 +48,5 @@ options:
 
 # Substitutions (default values)
 substitutions:
-  _ENABLE_HEARTS: 'false'  # Set to 'true' to enable HEARTS model (slower build)
+  _ENABLE_HEARTS: 'true'  # HEARTS model enabled (includes transformers, torch, shap, lime)
 

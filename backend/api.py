@@ -689,14 +689,14 @@ def graph_expand():
             # Rule-based only
             detected_biases = bias_detector.detect_biases(prompt)
 
-        # Step 2.5: Add Claude bias evaluation if available
+        # Step 2.5: Add Claude bias evaluation on the LLM answer if available
         claude_evaluation = None
-        if use_claude:
+        if use_claude and llm_answer:
             try:
                 llm = get_llm_service(model_id=model_id)
                 if hasattr(llm, 'evaluate_bias'):
-                    claude_evaluation = llm.evaluate_bias(prompt)
-                    print(f"✓ Claude bias evaluation complete")
+                    claude_evaluation = llm.evaluate_bias(llm_answer)
+                    print(f"✓ Claude bias evaluation complete (evaluated answer)")
             except Exception as e:
                 print(f"Warning: Claude evaluation failed: {e}")
 
@@ -713,11 +713,16 @@ def graph_expand():
             'prediction' in hearts_data
         )
         
+        # Only warn if HEARTS was attempted but didn't return valid results
+        # Don't warn if HEARTS failed to initialize (that's already logged)
         if use_hearts and not hearts_actually_worked:
-            # HEARTS was attempted but didn't return valid results
-            print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
-            if detected_biases.get('hearts_error'):
-                print(f"  HEARTS error: {detected_biases.get('hearts_error')}")
+            hearts_error = detected_biases.get('hearts_error', '')
+            if hearts_error:
+                # HEARTS failed to initialize - already logged, don't duplicate warning
+                pass
+            else:
+                # HEARTS ran but returned empty results - this is unusual
+                print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
 
         # Safely extract token importance (ensure it's serializable)
         token_importance = []
@@ -995,13 +1000,13 @@ def graph_expand_node():
         else:
             detected_biases = bias_detector.detect_biases(new_prompt)
 
-        # Add Claude bias evaluation if available
+        # Add Claude bias evaluation on the LLM answer if available
         claude_evaluation = None
-        if use_claude:
+        if use_claude and llm_answer:
             try:
                 if hasattr(llm, 'evaluate_bias'):
-                    claude_evaluation = llm.evaluate_bias(new_prompt)
-                    print(f"✓ Claude bias evaluation complete")
+                    claude_evaluation = llm.evaluate_bias(llm_answer)
+                    print(f"✓ Claude bias evaluation complete (evaluated answer)")
             except Exception as e:
                 print(f"Warning: Claude evaluation failed: {e}")
 
@@ -1019,11 +1024,16 @@ def graph_expand_node():
             'prediction' in hearts_data
         )
         
+        # Only warn if HEARTS was attempted but didn't return valid results
+        # Don't warn if HEARTS failed to initialize (that's already logged)
         if use_hearts and not hearts_actually_worked:
-            # HEARTS was attempted but didn't return valid results
-            print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
-            if detected_biases.get('hearts_error'):
-                print(f"  HEARTS error: {detected_biases.get('hearts_error')}")
+            hearts_error = detected_biases.get('hearts_error', '')
+            if hearts_error:
+                # HEARTS failed to initialize - already logged, don't duplicate warning
+                pass
+            else:
+                # HEARTS ran but returned empty results - this is unusual
+                print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
 
         # Safely extract token importance
         token_importance = []

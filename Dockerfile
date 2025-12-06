@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Define build argument for optional HEARTS ML dependencies
 # Set to true to enable HEARTS model (adds ~2GB and significant build time)
-ARG ENABLE_HEARTS=false
+ARG ENABLE_HEARTS=true
 
 # Copy requirements first for better caching
 # Install core dependencies first (faster, better caching)

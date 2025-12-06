@@ -708,23 +708,23 @@ Your response must be ONLY the debiased prompt."""
         context: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Use Claude to evaluate bias in a prompt with zero-shot prompting.
+        Use Claude to evaluate bias in an LLM answer with zero-shot prompting.
         
         Args:
-            prompt: Prompt to evaluate
-            context: Optional context about the prompt
+            prompt: LLM answer to evaluate (parameter name kept as 'prompt' for compatibility)
+            context: Optional context about the answer
             
         Returns:
             Dictionary with bias evaluation results including scores and bias types
         """
-        evaluation_prompt = f"""You are an expert in bias detection and analysis. Evaluate the following prompt for various types of bias.
+        evaluation_prompt = f"""You are an expert in bias detection and analysis. Evaluate the following LLM answer for various types of bias.
 
-PROMPT TO EVALUATE:
+ANSWER TO EVALUATE:
 {prompt}
 
 {f"CONTEXT: {context}" if context else ""}
 
-Evaluate this prompt across the following bias categories:
+Evaluate this answer across the following bias categories:
 1. Confirmation Bias - Does it lead toward a specific answer?
 2. Anchoring Bias - Does it anchor to specific information?
 3. Framing Bias - Is the question framed in a biased way?
@@ -765,7 +765,7 @@ Return your response as a JSON object with this structure:
     "overall_bias_score": 0.0-1.0,
     "severity": "none|low|medium|high|severe",
     "detected_bias_types": ["type1", "type2", ...],
-    "explanation": "Overall explanation of bias in the prompt",
+    "explanation": "Overall explanation of bias in the answer",
     "recommendations": "Recommendations for reducing bias"
 }}"""
         

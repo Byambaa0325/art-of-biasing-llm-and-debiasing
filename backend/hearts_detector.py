@@ -11,14 +11,13 @@ Binary classification: Stereotype vs Non-Stereotype
 from typing import Dict, Any, List, Optional
 import numpy as np
 
-# Try to import required libraries
+# Try to import required libraries (silently - warnings only shown when actually initializing)
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
     import torch
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print("Warning: transformers or torch not available. Install with: pip install transformers torch")
 
 # Try to import SHAP for explainability
 try:
@@ -26,7 +25,6 @@ try:
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
-    print("Warning: SHAP not available. Install with: pip install shap")
 
 # Try to import LIME for confidence scoring
 try:
@@ -34,7 +32,6 @@ try:
     LIME_AVAILABLE = True
 except ImportError:
     LIME_AVAILABLE = False
-    print("Warning: LIME not available. Install with: pip install lime")
 
 
 class HEARTSDetector:
@@ -76,10 +73,16 @@ class HEARTSDetector:
             raise ImportError(
                 "transformers library required. Install with: pip install transformers torch"
             )
+        
+        # Warn about missing optional dependencies only when initializing
+        if enable_shap and not SHAP_AVAILABLE:
+            print("Warning: SHAP requested but not available. Install with: pip install shap")
+        if enable_lime and not LIME_AVAILABLE:
+            print("Warning: LIME requested but not available. Install with: pip install lime")
 
         self.model_name = model_name or self.MODEL_NAME
-        self.enable_shap = enable_shap
-        self.enable_lime = enable_lime
+        self.enable_shap = enable_shap and SHAP_AVAILABLE
+        self.enable_lime = enable_lime and LIME_AVAILABLE
 
         # Auto-detect device
         if device is None:
