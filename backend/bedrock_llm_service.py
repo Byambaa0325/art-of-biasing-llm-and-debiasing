@@ -87,6 +87,73 @@ class BedrockLLMService:
             BedrockModels.CLAUDE_3_5_SONNET_V2
         )
     
+    def _clean_text_output(self, text: str) -> str:
+        """
+        Clean up LLM output to remove formatting issues, repeated sentences, and random characters.
+        Especially useful for older models that may produce messy output.
+        
+        Args:
+            text: Raw text output from LLM
+            
+        Returns:
+            Cleaned text
+        """
+        if not text:
+            return text
+        
+        import re
+        
+        # Remove control characters and non-printable characters (except newlines and tabs)
+        text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', text)
+        
+        # Normalize whitespace (multiple spaces to single, but preserve newlines)
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple newlines to double
+        
+        # Remove repeated sentences/phrases (simple heuristic: same sentence appearing multiple times)
+        sentences = re.split(r'([.!?]+)', text)
+        seen = set()
+        cleaned_sentences = []
+        for i in range(0, len(sentences) - 1, 2):
+            if i + 1 < len(sentences):
+                sentence = (sentences[i] + sentences[i + 1]).strip().lower()
+                if sentence and sentence not in seen and len(sentence) > 10:
+                    seen.add(sentence)
+                    cleaned_sentences.append(sentences[i] + sentences[i + 1])
+                elif sentence and sentence in seen:
+                    # Skip repeated sentence
+                    continue
+                else:
+                    cleaned_sentences.append(sentences[i] + sentences[i + 1])
+        
+        if cleaned_sentences:
+            text = ''.join(cleaned_sentences)
+        
+        # Remove incomplete sentences at the end (sentences without proper ending)
+        text = text.strip()
+        # If text doesn't end with proper punctuation, try to find the last complete sentence
+        if text and text[-1] not in '.!?':
+            # Find the last complete sentence
+            last_sentence_end = max(
+                text.rfind('.'),
+                text.rfind('!'),
+                text.rfind('?')
+            )
+            if last_sentence_end > len(text) * 0.5:  # Only if it's not too short
+                text = text[:last_sentence_end + 1]
+        
+        # Remove random character sequences (3+ consecutive special chars except punctuation)
+        text = re.sub(r'[^\w\s\.\,\!\?\:\;\-\'\"][^\w\s\.\,\!\?\:\;\-\'\"][^\w\s\.\,\!\?\:\;\-\'\"]+', '', text)
+        
+        # Remove leading/trailing special characters (except punctuation)
+        text = re.sub(r'^[^\w\s\.\,\!\?\:\;\-\'\"\n]+', '', text)
+        text = re.sub(r'[^\w\s\.\,\!\?\:\;\-\'\"\n]+$', '', text)
+        
+        # Final normalization
+        text = text.strip()
+        
+        return text
+    
     def _model_supports_temperature(self, model_id: str) -> bool:
         """
         Check if a model supports the temperature parameter.
@@ -212,13 +279,18 @@ class BedrockLLMService:
         # Append instruction to the prompt to ensure the LLM follows it
         prompt_with_instruction = f"{prompt}"
         
-        return self.generate(
+        answer = self.generate(
             prompt=prompt_with_instruction,
             system_prompt=system_prompt,
             temperature=0.7,
             max_tokens=1024,
             model_override=model
         )
+        
+        # Clean up the answer to remove formatting issues
+        answer = self._clean_text_output(answer)
+        
+        return answer
     
     def inject_bias_llm(
         self,
@@ -425,6 +497,9 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
             # Remove leading/trailing quotes
             turn1_question = turn1_question.strip('"\'')
             
+            # Clean up formatting issues (repeated sentences, random characters)
+            turn1_question = self._clean_text_output(turn1_question)
+            
             # If still contains explanatory text, try to extract just the question part
             if len(turn1_question) > 200 or turn1_question.count('?') > 1:
                 # Likely contains explanation, try to find the actual question
@@ -435,31 +510,52 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
                         turn1_question = sentence + '?'
                         break
             
+            # Final cleanup after extraction
+            turn1_question = self._clean_text_output(turn1_question)
+            
             # Step 2: Multi-turn conversation
             # Build conversation history - prepend existing conversation if available
             conversation = []
             
             # If there's existing conversation, convert it to message format and prepend
+            # Handle nested conversations recursively
             if existing_conversation:
-                # Convert existing conversation dict to message list format
+                def reconstruct_conversation(conv_dict, messages_list):
+                    """Recursively reconstruct conversation from nested structure"""
+                    if not conv_dict:
+                        return
+                    
+                    # If there's a previous conversation, process it first (recursive)
+                    if conv_dict.get('previous_conversation'):
+                        reconstruct_conversation(conv_dict['previous_conversation'], messages_list)
+                    
+                    # Then add the current conversation turns
+                    if conv_dict.get('turn1_question'):
+                        messages_list.append({"role": "user", "content": conv_dict['turn1_question']})
+                        print(f"  ✓ Prepended previous turn1_question: {conv_dict['turn1_question'][:50]}...")
+                    if conv_dict.get('turn1_response'):
+                        messages_list.append({"role": "assistant", "content": conv_dict['turn1_response']})
+                    if conv_dict.get('original_prompt'):
+                        messages_list.append({"role": "user", "content": conv_dict['original_prompt']})
+                    if conv_dict.get('turn2_response'):
+                        messages_list.append({"role": "assistant", "content": conv_dict['turn2_response']})
+                
                 existing_conv = existing_conversation
                 if isinstance(existing_conv, dict):
-                    # Reconstruct the full conversation from the dict
-                    if existing_conv.get('turn1_question'):
-                        conversation.append({"role": "user", "content": existing_conv['turn1_question']})
-                    if existing_conv.get('turn1_response'):
-                        conversation.append({"role": "assistant", "content": existing_conv['turn1_response']})
-                    if existing_conv.get('original_prompt'):
-                        conversation.append({"role": "user", "content": existing_conv['original_prompt']})
-                    if existing_conv.get('turn2_response'):
-                        conversation.append({"role": "assistant", "content": existing_conv['turn2_response']})
+                    # Reconstruct the full conversation recursively (handles nested previous_conversation)
+                    bias_count = existing_conv.get('bias_count', 1)
+                    print(f"✓ Reconstructing conversation with {bias_count} previous bias injection(s)")
+                    reconstruct_conversation(existing_conv, conversation)
+                    print(f"✓ Reconstructed conversation has {len(conversation)} messages before adding new turn")
                 elif isinstance(existing_conv, list):
                     # Already in message format
                     conversation = existing_conv.copy()
+                    print(f"✓ Using existing conversation list with {len(conversation)} messages")
             
             # Now add the new bias injection turns
             # Turn 1: Send new priming question
             conversation.append({"role": "user", "content": turn1_question})
+            print(f"✓ Added new turn1_question. Total conversation messages: {len(conversation)}")
             
             # Get response to Turn 1
             model = model_id or self.default_model
@@ -473,6 +569,8 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
                 turn1_params["temperature"] = 0.7
             
             turn1_response = self.client.multi_turn_chat(**turn1_params)
+            # Clean up Turn 1 response to remove formatting issues
+            turn1_response = self._clean_text_output(turn1_response)
             
             # Turn 2: Send original prompt (continuing from previous conversation)
             conversation.append({"role": "assistant", "content": turn1_response})
@@ -489,6 +587,8 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
                 turn2_params["temperature"] = 0.7
             
             turn2_response = self.client.multi_turn_chat(**turn2_params)
+            # Clean up Turn 2 response to remove formatting issues
+            turn2_response = self._clean_text_output(turn2_response)
             
             # Get model name for display
             try:

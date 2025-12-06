@@ -563,16 +563,33 @@ def health_check():
     hearts_status = {
         'available': HEARTS_AGGREGATOR_AVAILABLE,
         'initialized': False,
-        'error': None
+        'lazy_loaded': False,
+        'error': None,
+        'status': 'unknown'
     }
     
     if bias_aggregator:
         try:
             hearts_status['initialized'] = getattr(bias_aggregator, '_hearts_initialized', False)
+            hearts_status['lazy_loaded'] = getattr(bias_aggregator, 'use_hearts', False) and not hearts_status['initialized']
+            
             if hasattr(bias_aggregator, '_hearts_init_error') and bias_aggregator._hearts_init_error:
                 hearts_status['error'] = bias_aggregator._hearts_init_error
+                hearts_status['status'] = 'error'
+            elif hearts_status['initialized']:
+                hearts_status['status'] = 'ready'
+            elif hearts_status['lazy_loaded']:
+                hearts_status['status'] = 'lazy_loaded'  # Available but will initialize on first use
+            elif HEARTS_AGGREGATOR_AVAILABLE:
+                hearts_status['status'] = 'available'  # Available but not enabled
+            else:
+                hearts_status['status'] = 'unavailable'
         except Exception:
             pass  # Ignore errors when checking status
+    elif HEARTS_AGGREGATOR_AVAILABLE:
+        hearts_status['status'] = 'available'
+    else:
+        hearts_status['status'] = 'unavailable'
     
     return jsonify({
         'status': 'healthy',
@@ -688,9 +705,23 @@ def graph_expand():
         gemini_data = detected_biases.get('gemini_validation', {}) if isinstance(detected_biases.get('gemini_validation'), dict) else {}
         explanations = detected_biases.get('explanations', {}) if isinstance(detected_biases.get('explanations'), dict) else {}
 
+        # Check if HEARTS actually returned valid results
+        # If hearts_data is empty or missing key fields, HEARTS didn't work properly
+        hearts_actually_worked = use_hearts and hearts_data and (
+            'is_stereotype' in hearts_data or 
+            'confidence' in hearts_data or 
+            'prediction' in hearts_data
+        )
+        
+        if use_hearts and not hearts_actually_worked:
+            # HEARTS was attempted but didn't return valid results
+            print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
+            if detected_biases.get('hearts_error'):
+                print(f"  HEARTS error: {detected_biases.get('hearts_error')}")
+
         # Safely extract token importance (ensure it's serializable)
         token_importance = []
-        if use_hearts and explanations.get('most_biased_tokens'):
+        if hearts_actually_worked and explanations.get('most_biased_tokens'):
             raw_tokens = explanations.get('most_biased_tokens', [])[:10]
             for token in raw_tokens:
                 if isinstance(token, dict):
@@ -709,13 +740,14 @@ def graph_expand():
 
             # HEARTS ML evaluation
             'hearts_evaluation': {
-                'available': use_hearts,
-                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if use_hearts else None,
-                'confidence': float(hearts_data.get('confidence', 0)) if use_hearts else None,
-                'probabilities': dict(hearts_data.get('probabilities', {})) if use_hearts else {},
-                'prediction': str(hearts_data.get('prediction', 'Unknown')) if use_hearts else None,
+                'available': hearts_actually_worked,
+                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if hearts_actually_worked else None,
+                'confidence': float(hearts_data.get('confidence', 0)) if hearts_actually_worked else None,
+                'probabilities': dict(hearts_data.get('probabilities', {})) if hearts_actually_worked else {},
+                'prediction': str(hearts_data.get('prediction', 'Unknown')) if hearts_actually_worked else None,
                 'token_importance': token_importance,
-                'model': 'HEARTS ALBERT-v2' if use_hearts else None
+                'model': 'HEARTS ALBERT-v2' if hearts_actually_worked else None,
+                'error': detected_biases.get('hearts_error') if use_hearts and not hearts_actually_worked else None
             },
 
             # Gemini LLM evaluation
@@ -870,8 +902,8 @@ def graph_expand_node():
         bias_type = data.get('bias_type')  # For bias actions
         debias_method = data.get('method')  # For debias actions
         model_id = data.get('model_id')  # Optional model ID
-        # Note: Each node maintains its own separate conversation context
-        # We do NOT use parent_conversation to ensure node independence
+        # Get existing conversation history from parent node (for nested bias injection)
+        parent_conversation = data.get('parent_conversation')  # Optional: existing conversation from parent
 
         if not parent_prompt or not parent_id:
             return jsonify({'error': 'Missing node_id or prompt'}), 400
@@ -887,13 +919,12 @@ def graph_expand_node():
                 return jsonify({'error': 'Missing bias_type for bias action'}), 400
 
             print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
-            # Each node starts with a fresh conversation context (no parent conversation)
-            # This ensures each node maintains its own separate conversation history
+            # Pass existing conversation to prepend new bias injection turns (for nested bias injection)
             transformation = llm.inject_bias_llm(
                 parent_prompt, 
                 bias_type, 
                 model_id=model_id,
-                existing_conversation=None  # Always start fresh for node independence
+                existing_conversation=parent_conversation  # Prepend parent conversation for nested injections
             )
             
             # Handle multi-turn format: biased_prompt is the original prompt, conversation has the history
@@ -980,9 +1011,23 @@ def graph_expand_node():
         gemini_data = detected_biases.get('gemini_validation', {}) if isinstance(detected_biases.get('gemini_validation'), dict) else {}
         explanations = detected_biases.get('explanations', {}) if isinstance(detected_biases.get('explanations'), dict) else {}
 
+        # Check if HEARTS actually returned valid results
+        # If hearts_data is empty or missing key fields, HEARTS didn't work properly
+        hearts_actually_worked = use_hearts and hearts_data and (
+            'is_stereotype' in hearts_data or 
+            'confidence' in hearts_data or 
+            'prediction' in hearts_data
+        )
+        
+        if use_hearts and not hearts_actually_worked:
+            # HEARTS was attempted but didn't return valid results
+            print(f"Warning: HEARTS evaluation returned empty results. Check if HEARTS is properly initialized.")
+            if detected_biases.get('hearts_error'):
+                print(f"  HEARTS error: {detected_biases.get('hearts_error')}")
+
         # Safely extract token importance
         token_importance = []
-        if use_hearts and explanations.get('most_biased_tokens'):
+        if hearts_actually_worked and explanations.get('most_biased_tokens'):
             raw_tokens = explanations.get('most_biased_tokens', [])[:10]
             for token in raw_tokens:
                 if isinstance(token, dict):
@@ -1012,13 +1057,14 @@ def graph_expand_node():
 
             # HEARTS ML evaluation
             'hearts_evaluation': {
-                'available': use_hearts,
-                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if use_hearts else None,
-                'confidence': float(hearts_data.get('confidence', 0)) if use_hearts else None,
-                'probabilities': dict(hearts_data.get('probabilities', {})) if use_hearts else {},
-                'prediction': str(hearts_data.get('prediction', 'Unknown')) if use_hearts else None,
+                'available': hearts_actually_worked,
+                'is_stereotype': bool(hearts_data.get('is_stereotype', False)) if hearts_actually_worked else None,
+                'confidence': float(hearts_data.get('confidence', 0)) if hearts_actually_worked else None,
+                'probabilities': dict(hearts_data.get('probabilities', {})) if hearts_actually_worked else {},
+                'prediction': str(hearts_data.get('prediction', 'Unknown')) if hearts_actually_worked else None,
                 'token_importance': token_importance,
-                'model': 'HEARTS ALBERT-v2' if use_hearts else None
+                'model': 'HEARTS ALBERT-v2' if hearts_actually_worked else None,
+                'error': detected_biases.get('hearts_error') if use_hearts and not hearts_actually_worked else None
             },
 
             # Gemini LLM evaluation

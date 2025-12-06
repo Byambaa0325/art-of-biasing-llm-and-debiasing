@@ -414,6 +414,16 @@ function App() {
     setExpandingNodeId(potentialNodeId);
     setLoading(true);
     try {
+      // Get parent node to extract conversation history for nested bias injection
+      let currentNodes = nodesRef.current;
+      let parentNode = currentNodes.find(n => n.id === parentNodeId);
+      
+      // Extract parent conversation history if it exists (for nested bias injection)
+      let parentConversation = null;
+      if (parentNode?.data?.transformation_details?.conversation) {
+        parentConversation = parentNode.data.transformation_details.conversation;
+      }
+
       const payload = {
         node_id: parentNodeId,
         prompt: parentPrompt,
@@ -424,8 +434,10 @@ function App() {
       // Add specific params based on action type
       if (pathData.type === 'bias') {
         payload.bias_type = pathData.bias_type;
-        // Each node maintains its own separate conversation context
-        // Do NOT pass parent_conversation to ensure independence
+        // Include parent conversation for nested bias injection (to prepend new turns)
+        if (parentConversation) {
+          payload.parent_conversation = parentConversation;
+        }
       } else {
         payload.method = pathData.method;
       }
@@ -448,11 +460,11 @@ function App() {
       console.log('Actual edges:', actualEdges.length);
       console.log('Potential paths:', potentialPaths.length);
 
-      // Get current nodes and find the potential node to replace
-      let currentNodes = nodesRef.current;
+      // Refresh current nodes and find the potential node to replace
+      currentNodes = nodesRef.current;
       const currentEdges = edges;
       const potentialNode = currentNodes.find(n => n.id === potentialNodeId);
-      let parentNode = currentNodes.find(n => n.id === parentNodeId);
+      parentNode = currentNodes.find(n => n.id === parentNodeId);
 
       // Use the position and metadata of the potential node
       const actualNodePosition = potentialNode?.position || parentNode?.position || { x: LAYOUT_CONFIG.centerX, y: LAYOUT_CONFIG.centerY };
@@ -1169,23 +1181,25 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
             <Paper
               sx={{
                 mt: 1,
-                p: 1,
+                p: 1.5,
                 bgcolor: 'grey.50',
                 fontSize: '11px',
-                maxHeight: '150px',
-                overflow: 'auto',
+                maxHeight: '200px',
+                overflowY: 'auto',
+                overflowX: 'hidden',
                 width: '100%',
                 boxSizing: 'border-box',
               }}
               elevation={0}
             >
               <Typography
-                variant="caption"
+                variant="body2"
                 sx={{
                   display: 'block',
                   wordBreak: 'break-word',
                   overflowWrap: 'break-word',
                   whiteSpace: 'pre-wrap',
+                  margin: 0,
                 }}
               >
                 {node.llm_answer || ''}
@@ -1228,7 +1242,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
       )}
 
       {/* Evaluations Toggle */}
-      {(node.hearts_evaluation?.available || node.gemini_evaluation?.available) && (
+      {(node.hearts_evaluation?.available || node.gemini_evaluation?.available || node.claude_evaluation?.available) && (
         <Box sx={{ mb: 1.5, width: '100%', overflow: 'hidden' }}>
           <Button
             size="small"
@@ -1309,6 +1323,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                 <Paper
                   sx={{
                     p: 1,
+                    mb: 1,
                     bgcolor: 'purple.50',
                     width: '100%',
                     boxSizing: 'border-box',
@@ -1355,6 +1370,83 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                       }}
                     >
                       {node.gemini_evaluation.explanation}
+                    </Typography>
+                  )}
+                </Paper>
+              )}
+
+              {/* Claude Evaluation */}
+              {node.claude_evaluation?.available && (
+                <Paper
+                  sx={{
+                    p: 1,
+                    bgcolor: 'orange.50',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden',
+                  }}
+                  elevation={0}
+                >
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontWeight: 'bold',
+                      display: 'block',
+                      fontSize: '10px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {node.claude_evaluation.model || 'Claude 3.5 Sonnet'} ({node.claude_evaluation.method || 'Zero-shot'})
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontSize: '9px',
+                      display: 'block',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Bias Score: {((node.claude_evaluation.bias_score || 0) * 100).toFixed(0)}% | Severity: {node.claude_evaluation.severity || 'Unknown'}
+                  </Typography>
+                  {node.claude_evaluation.bias_types && node.claude_evaluation.bias_types.length > 0 && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.3, mt: 0.5 }}>
+                      {node.claude_evaluation.bias_types.slice(0, 3).map((type, i) => (
+                        <Chip
+                          key={i}
+                          label={type}
+                          size="small"
+                          sx={{
+                            fontSize: '8px',
+                            height: '16px',
+                            maxWidth: '100%',
+                            '& .MuiChip-label': {
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            },
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  )}
+                  {node.claude_evaluation.explanation && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        fontSize: '8px',
+                        mt: 0.5,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {node.claude_evaluation.explanation}
                     </Typography>
                   )}
                 </Paper>
@@ -1409,6 +1501,128 @@ function NodeDialog({ open, onClose, node, evaluating }) {
             </Typography>
           </Paper>
         </Box>
+
+        {/* HEARTS, Gemini, and Claude Evaluations */}
+        {(node.hearts_evaluation?.available || node.gemini_evaluation?.available || node.claude_evaluation?.available) && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Bias Evaluations:
+            </Typography>
+            
+            {/* HEARTS Evaluation */}
+            {node.hearts_evaluation?.available && (
+              <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'blue.50' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  HEARTS ALBERT-v2
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  Prediction: {node.hearts_evaluation.prediction || 'Unknown'} 
+                  ({(node.hearts_evaluation.confidence * 100).toFixed(0)}% confidence)
+                </Typography>
+                {node.hearts_evaluation.token_importance && node.hearts_evaluation.token_importance.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                      Top Biased Tokens:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {node.hearts_evaluation.token_importance.slice(0, 5).map((token, i) => (
+                        <Chip
+                          key={i}
+                          label={`${token.token}: ${token.importance.toFixed(2)}`}
+                          size="small"
+                          sx={{ fontSize: '9px' }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+              </Paper>
+            )}
+
+            {/* Gemini Evaluation */}
+            {node.gemini_evaluation?.available && (
+              <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'purple.50' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  Gemini 2.5 Flash
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  Severity: {node.gemini_evaluation.severity || 'Unknown'}
+                </Typography>
+                {node.gemini_evaluation.explanation && (
+                  <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                    {node.gemini_evaluation.explanation}
+                  </Typography>
+                )}
+              </Paper>
+            )}
+
+            {/* Claude Evaluation */}
+            {node.claude_evaluation?.available && (
+              <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'orange.50' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  {node.claude_evaluation.model || 'Claude 3.5 Sonnet'} ({node.claude_evaluation.method || 'Zero-shot'})
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  Bias Score: {((node.claude_evaluation.bias_score || 0) * 100).toFixed(0)}% | 
+                  Severity: {node.claude_evaluation.severity || 'Unknown'}
+                </Typography>
+                {node.claude_evaluation.bias_types && node.claude_evaluation.bias_types.length > 0 && (
+                  <Box sx={{ mt: 1, mb: 1 }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                      Detected Bias Types:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {node.claude_evaluation.bias_types.map((type, i) => (
+                        <Chip
+                          key={i}
+                          label={type}
+                          size="small"
+                          color={node.claude_evaluation.severity === 'high' || node.claude_evaluation.severity === 'severe' ? 'error' : 'warning'}
+                          sx={{ fontSize: '9px' }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+                {node.claude_evaluation.bias_scores && Object.keys(node.claude_evaluation.bias_scores).length > 0 && (
+                  <Box sx={{ mt: 1, mb: 1 }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                      Bias Category Scores:
+                    </Typography>
+                    {Object.entries(node.claude_evaluation.bias_scores).slice(0, 5).map(([category, data]) => (
+                      <Box key={category} sx={{ mb: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ textTransform: 'capitalize' }}>
+                          {category.replace(/_/g, ' ')}:
+                        </Typography>
+                        <Chip
+                          label={`${((typeof data === 'object' && data.score) ? data.score : data) * 100}%`}
+                          size="small"
+                          color={((typeof data === 'object' && data.score) ? data.score : data) > 0.6 ? 'error' : ((typeof data === 'object' && data.score) ? data.score : data) > 0.3 ? 'warning' : 'success'}
+                          sx={{ fontSize: '9px', height: '20px' }}
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+                {node.claude_evaluation.explanation && (
+                  <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                    {node.claude_evaluation.explanation}
+                  </Typography>
+                )}
+                {node.claude_evaluation.recommendations && (
+                  <Paper sx={{ p: 1, mt: 1, bgcolor: 'info.light' }}>
+                    <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>
+                      Recommendations:
+                    </Typography>
+                    <Typography variant="body2">
+                      {node.claude_evaluation.recommendations}
+                    </Typography>
+                  </Paper>
+                )}
+              </Paper>
+            )}
+          </Box>
+        )}
 
         {/* Bias Metrics from Multiple Judges */}
         {node.bias_metrics && node.bias_metrics.length > 0 && (
