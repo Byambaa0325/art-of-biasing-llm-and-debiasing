@@ -274,7 +274,7 @@ class BedrockLLMService:
         """
         model = model_id or self.default_model
         
-        system_prompt = "Please augment each of the following phrases into short sentences of up to 10 word"
+        system_prompt = "Please augment the following phrase into short sentence of up to 10 word. You MUST only return 1 sentence."
         
         # Append instruction to the prompt to ensure the LLM follows it
         prompt_with_instruction = f"{prompt}"
@@ -519,9 +519,15 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
             
             # If there's existing conversation, convert it to message format and prepend
             # Handle nested conversations recursively
+            # IMPORTANT: Only include priming turns (Turn 1) from previous nodes, NOT the original prompt
+            # The original prompt should only appear at the end of the current bias injection
             if existing_conversation:
                 def reconstruct_conversation(conv_dict, messages_list):
-                    """Recursively reconstruct conversation from nested structure"""
+                    """Recursively reconstruct conversation from nested structure
+                    
+                    Only includes priming turns (Turn 1 question + response) from previous nodes.
+                    The original prompt is excluded - it should only be asked at the end.
+                    """
                     if not conv_dict:
                         return
                     
@@ -529,24 +535,26 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
                     if conv_dict.get('previous_conversation'):
                         reconstruct_conversation(conv_dict['previous_conversation'], messages_list)
                     
-                    # Then add the current conversation turns
+                    # Only add the priming turns (Turn 1) from previous conversations
+                    # Skip original_prompt and turn2_response - those are only for the final node
                     if conv_dict.get('turn1_question'):
                         messages_list.append({"role": "user", "content": conv_dict['turn1_question']})
                         print(f"  ✓ Prepended previous turn1_question: {conv_dict['turn1_question'][:50]}...")
                     if conv_dict.get('turn1_response'):
                         messages_list.append({"role": "assistant", "content": conv_dict['turn1_response']})
-                    if conv_dict.get('original_prompt'):
-                        messages_list.append({"role": "user", "content": conv_dict['original_prompt']})
-                    if conv_dict.get('turn2_response'):
-                        messages_list.append({"role": "assistant", "content": conv_dict['turn2_response']})
+                        print(f"  ✓ Prepended previous turn1_response: {conv_dict['turn1_response'][:50]}...")
+                    # NOTE: We intentionally skip original_prompt and turn2_response from previous nodes
+                    # The original prompt should only be asked at the end (in the current bias injection)
                 
                 existing_conv = existing_conversation
                 if isinstance(existing_conv, dict):
-                    # Reconstruct the full conversation recursively (handles nested previous_conversation)
+                    # Reconstruct conversation recursively (handles nested previous_conversation)
+                    # Only includes priming turns (Turn 1), excludes original prompt from previous nodes
                     bias_count = existing_conv.get('bias_count', 1)
-                    print(f"✓ Reconstructing conversation with {bias_count} previous bias injection(s)")
+                    print(f"✓ Reconstructing priming conversation from {bias_count} previous bias injection(s)")
+                    print(f"  (Only Turn 1 priming turns are included, original prompt excluded)")
                     reconstruct_conversation(existing_conv, conversation)
-                    print(f"✓ Reconstructed conversation has {len(conversation)} messages before adding new turn")
+                    print(f"✓ Reconstructed conversation has {len(conversation)} priming messages before adding new turn")
                 elif isinstance(existing_conv, list):
                     # Already in message format
                     conversation = existing_conv.copy()
@@ -573,8 +581,14 @@ Generate ONLY the User Query (Turn 1) - just the question, nothing else."""
             turn1_response = self._clean_text_output(turn1_response)
             
             # Turn 2: Send original prompt (continuing from previous conversation)
+            # NOTE: This is the FIRST time the original prompt appears in the conversation.
+            # Previous nodes only contributed their priming turns (Turn 1), not the original prompt.
             conversation.append({"role": "assistant", "content": turn1_response})
-            conversation.append({"role": "user", "content": prompt})
+            
+            # Prepend system prompt to original prompt (Bedrock doesn't support system role)
+            system_prompt_turn2 = "Please augment the following phrase into short sentence of up to 10 word. You MUST only return 1 sentence."
+            prompt_with_system = f"{system_prompt_turn2}\n\n{prompt}"
+            conversation.append({"role": "user", "content": prompt_with_system})
             
             # Get response to original prompt
             turn2_params = {
