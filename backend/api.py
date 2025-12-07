@@ -667,27 +667,28 @@ def graph_expand():
             llm_answer = "[LLM not available - configure Vertex AI or Bedrock]"
 
         # Step 2: Multi-layer bias detection (HEARTS + Gemini/Claude)
+        # HEARTS analyzes the LLM answer, not the original prompt
         use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
         use_gemini = VERTEX_LLM_AVAILABLE
         use_claude = BEDROCK_LLM_AVAILABLE
 
-        if use_hearts:
+        if use_hearts and llm_answer:
             try:
                 detected_biases = bias_aggregator.detect_all_layers(
-                    prompt=prompt,
+                    prompt=llm_answer,  # Analyze the LLM answer, not the original prompt
                     use_hearts=True,
                     use_gemini=use_gemini,  # Enable Gemini evaluation
                     explain=True
                 )
-                print(f"✓ Multi-layer detection complete (HEARTS + Gemini)")
+                print(f"✓ Multi-layer detection complete (HEARTS + Gemini on answer)")
             except Exception as e:
                 print(f"Warning: HEARTS detection failed: {e}")
                 # Fallback to rule-based
-                detected_biases = bias_detector.detect_biases(prompt)
+                detected_biases = bias_detector.detect_biases(llm_answer)
                 use_hearts = False
         else:
-            # Rule-based only
-            detected_biases = bias_detector.detect_biases(prompt)
+            # Rule-based only (analyze answer if available, otherwise prompt)
+            detected_biases = bias_detector.detect_biases(llm_answer if llm_answer else prompt)
 
         # Step 2.5: Add Claude bias evaluation on the LLM answer if available
         claude_evaluation = None
@@ -981,24 +982,25 @@ def graph_expand_node():
                 llm_answer = f"[Error generating answer: {str(e)}]"
 
         # Step 3 & 4: Evaluate with HEARTS + Gemini/Claude
+        # HEARTS analyzes the LLM answer, not the prompt
         use_hearts = HEARTS_AGGREGATOR_AVAILABLE and bias_aggregator
         use_claude = BEDROCK_LLM_AVAILABLE
 
-        if use_hearts:
+        if use_hearts and llm_answer:
             try:
                 detected_biases = bias_aggregator.detect_all_layers(
-                    prompt=new_prompt,
+                    prompt=llm_answer,  # Analyze the LLM answer, not the prompt
                     use_hearts=True,
                     use_gemini=True,  # Enable Gemini
                     explain=True
                 )
-                print(f"✓ Multi-layer evaluation complete")
+                print(f"✓ Multi-layer evaluation complete (HEARTS + Gemini on answer)")
             except Exception as e:
                 print(f"Warning: Multi-layer evaluation failed: {e}")
-                detected_biases = bias_detector.detect_biases(new_prompt)
+                detected_biases = bias_detector.detect_biases(llm_answer)
                 use_hearts = False
         else:
-            detected_biases = bias_detector.detect_biases(new_prompt)
+            detected_biases = bias_detector.detect_biases(llm_answer if llm_answer else new_prompt)
 
         # Add Claude bias evaluation on the LLM answer if available
         claude_evaluation = None

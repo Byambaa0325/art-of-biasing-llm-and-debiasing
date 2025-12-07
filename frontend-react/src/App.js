@@ -1195,6 +1195,73 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
         </Box>
       )}
 
+      {/* Main Evaluation Badges - Always Visible */}
+      <Box sx={{ mb: 1, width: '100%', display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+        {/* HEARTS Badge */}
+        {node.hearts_evaluation?.available && (
+          <Chip
+            label={`HEARTS: ${node.hearts_evaluation.prediction || 'Unknown'} (${(node.hearts_evaluation.confidence * 100).toFixed(0)}%)`}
+            size="small"
+            color={node.hearts_evaluation.is_stereotype ? 'error' : 'success'}
+            sx={{ 
+              fontSize: '9px', 
+              height: '20px',
+              fontWeight: 'bold',
+              bgcolor: node.hearts_evaluation.is_stereotype ? '#fee' : '#efe',
+              borderColor: node.hearts_evaluation.is_stereotype ? '#f66' : '#6f6',
+              border: '1px solid'
+            }}
+            title={`HEARTS ALBERT-v2 stereotype detection - Confidence: ${(node.hearts_evaluation.confidence * 100).toFixed(0)}%`}
+          />
+        )}
+
+        {/* Claude Badge */}
+        {node.claude_evaluation?.available && (
+          <Chip
+            label={`Claude: ${node.claude_evaluation.severity || 'Unknown'} (${((node.claude_evaluation.bias_score || 0) * 100).toFixed(0)}%)`}
+            size="small"
+            color={
+              node.claude_evaluation.severity === 'severe' || node.claude_evaluation.severity === 'high' ? 'error' :
+              node.claude_evaluation.severity === 'medium' ? 'warning' : 
+              node.claude_evaluation.severity === 'low' ? 'success' : 'default'
+            }
+            sx={{ 
+              fontSize: '9px', 
+              height: '20px',
+              fontWeight: 'bold',
+              bgcolor: 
+                node.claude_evaluation.severity === 'severe' || node.claude_evaluation.severity === 'high' ? '#ffe0e0' :
+                node.claude_evaluation.severity === 'medium' ? '#fff4e0' : 
+                node.claude_evaluation.severity === 'low' ? '#e8f5e9' : '#f5f5f5',
+              borderColor: 
+                node.claude_evaluation.severity === 'severe' || node.claude_evaluation.severity === 'high' ? '#ff6b6b' :
+                node.claude_evaluation.severity === 'medium' ? '#ffc107' : 
+                node.claude_evaluation.severity === 'low' ? '#4caf50' : '#999',
+              border: '1px solid'
+            }}
+            title={`Claude ${node.claude_evaluation.model || '3.5 Sonnet'} zero-shot bias evaluation - ${node.claude_evaluation.bias_types?.length || 0} bias types detected`}
+          />
+        )}
+
+        {/* Gemini Badge */}
+        {node.gemini_evaluation?.available && (
+          <Chip
+            label={`Gemini: ${node.gemini_evaluation.severity || 'Unknown'}`}
+            size="small"
+            color={
+              node.gemini_evaluation.severity === 'severe' || node.gemini_evaluation.severity === 'high' ? 'error' :
+              node.gemini_evaluation.severity === 'medium' ? 'warning' : 'success'
+            }
+            sx={{ 
+              fontSize: '9px', 
+              height: '20px',
+              fontWeight: 'bold'
+            }}
+            title={`Gemini 2.5 Flash validation`}
+          />
+        )}
+      </Box>
+
       {/* Bias Metrics from Multiple Judges */}
       {node.bias_metrics && node.bias_metrics.length > 0 && (
         <Box sx={{ mb: 1, width: '100%' }}>
