@@ -13,7 +13,8 @@
       "Bash(python test_persona_injection.py:*)",
       "Bash(python -c:*)",
       "Bash(python test_nova_pro_persona.py:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
