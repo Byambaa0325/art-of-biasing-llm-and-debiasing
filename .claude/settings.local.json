@@ -7,7 +7,13 @@
       "Bash(timeout:*)",
       "Bash(nul)",
       "Bash(pip install:*)",
-      "Bash(python -m pytest:*)"
+      "Bash(python -m pytest:*)",
+      "Bash(git branch:*)",
+      "Bash(python -c \"from backend.bias_instructions import get_sentence_generation_guide; template = get_sentence_generation_guide(''confirmation_bias''); print(''Persona template loaded successfully:''); print(template[:200])\")",
+      "Bash(python test_persona_injection.py:*)",
+      "Bash(python -c:*)",
+      "Bash(python test_nova_pro_persona.py:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

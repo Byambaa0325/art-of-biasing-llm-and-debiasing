@@ -907,7 +907,8 @@ def graph_expand_node():
         action = data.get('action', 'debias')  # 'bias' or 'debias'
         bias_type = data.get('bias_type')  # For bias actions
         debias_method = data.get('method')  # For debias actions
-        model_id = data.get('model_id')  # Optional model ID
+        model_id = data.get('model_id')  # Optional model ID for target model evaluation
+        bias_generator_model_id = data.get('bias_generator_model_id')  # Optional: defaults to Amazon Nova Pro
         # Get existing conversation history from parent node (for nested bias injection)
         parent_conversation = data.get('parent_conversation')  # Optional: existing conversation from parent
 
@@ -924,13 +925,14 @@ def graph_expand_node():
             if not bias_type:
                 return jsonify({'error': 'Missing bias_type for bias action'}), 400
 
-            print(f"Injecting {bias_type} into prompt{' using ' + model_id if model_id else ''}...")
+            print(f"Injecting {bias_type} into prompt using persona-based approach with Amazon Nova Pro{' (target: ' + model_id + ')' if model_id else ''}...")
             # Pass existing conversation to prepend new bias injection turns (for nested bias injection)
             transformation = llm.inject_bias_llm(
-                parent_prompt, 
-                bias_type, 
-                model_id=model_id,
-                existing_conversation=parent_conversation  # Prepend parent conversation for nested injections
+                parent_prompt,
+                bias_type,
+                model_id=model_id,  # Target model being evaluated
+                existing_conversation=parent_conversation,  # Prepend parent conversation for nested injections
+                bias_generator_model_id=bias_generator_model_id  # Amazon Nova Pro for bias generation
             )
             
             # Handle multi-turn format: biased_prompt is the original prompt, conversation has the history
@@ -1064,6 +1066,7 @@ def graph_expand_node():
                 'explanation': str(transformation.get('explanation', '')),
                 'framework': str(transformation.get('framework', '')),
                 'multi_turn': transformation.get('multi_turn', False),
+                'prompt_approach': transformation.get('prompt_approach', 'N/A'),  # persona-based or psycholinguistic
                 'conversation': conversation if conversation else None
             },
 
@@ -1266,6 +1269,187 @@ def serve_frontend():
     })
 
 
+# =============================================================================
+# MODEL EXPLORATION ENDPOINTS
+# =============================================================================
+
+@app.route('/api/models/available', methods=['GET'])
+def get_available_models():
+    """
+    Get list of available models with their metadata.
+
+    Returns models categorized by:
+    - Bedrock models (support live generation)
+    - Ollama models (static benchmark only)
+    """
+    try:
+        from model_results_client import ModelResultsClient
+
+        client = ModelResultsClient()
+
+        bedrock_models = []
+        for model_id in client.get_bedrock_models():
+            meta = client.get_model_metadata(model_id)
+            bedrock_models.append({
+                'id': model_id,
+                'name': model_id.split('/')[-1] if '/' in model_id else model_id,
+                'type': 'bedrock',
+                'supports_live_generation': True,
+                'total_entries': meta['total_entries']
+            })
+
+        ollama_models = []
+        for model_id in client.get_ollama_models():
+            meta = client.get_model_metadata(model_id)
+            ollama_models.append({
+                'id': model_id,
+                'name': model_id,
+                'type': 'ollama',
+                'supports_live_generation': False,
+                'total_entries': meta['total_entries']
+            })
+
+        return jsonify({
+            'bedrock_models': bedrock_models,
+            'ollama_models': ollama_models,
+            'total_models': len(bedrock_models) + len(ollama_models)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/models/<path:model_id>/results', methods=['GET'])
+def get_model_results(model_id):
+    """
+    Get all results for a specific model.
+
+    Query parameters:
+    - bias_type: Filter by bias type
+    - stereotype_type: Filter by stereotype type
+    - limit: Limit number of results
+    - offset: Offset for pagination
+    """
+    try:
+        from model_results_client import ModelResultsClient
+
+        client = ModelResultsClient()
+
+        # Get query parameters
+        bias_type = request.args.get('bias_type')
+        stereotype_type = request.args.get('stereotype_type')
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', type=int, default=0)
+
+        # Get results
+        results = client.get_model_results(model_id)
+
+        # Apply filters
+        if bias_type:
+            results = [r for r in results if r.get('bias_type') == bias_type]
+        if stereotype_type:
+            results = [r for r in results if r.get('emgsd_stereotype_type') == stereotype_type]
+
+        # Apply pagination
+        total = len(results)
+        if limit:
+            results = results[offset:offset + limit]
+        else:
+            results = results[offset:]
+
+        return jsonify({
+            'model_id': model_id,
+            'results': results,
+            'total': total,
+            'offset': offset,
+            'limit': limit
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/models/<path:model_id>/result/<int:entry_index>', methods=['GET'])
+def get_model_result_by_index(model_id, entry_index):
+    """
+    Get a specific result entry by index.
+    """
+    try:
+        from model_results_client import ModelResultsClient
+
+        client = ModelResultsClient()
+        result = client.get_result_by_index(model_id, entry_index)
+
+        return jsonify({
+            'model_id': model_id,
+            'entry_index': entry_index,
+            'result': result
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dataset/entries', methods=['GET'])
+def get_dataset_entries():
+    """
+    Get dataset entries for exploration.
+
+    Query parameters:
+    - stereotype_type: Filter by stereotype type
+    - trait: Filter by trait
+    - limit: Limit number of results
+    - offset: Offset for pagination
+    """
+    try:
+        from dataset_client import EMGSDDatasetClient
+
+        client = EMGSDDatasetClient()
+
+        # Get query parameters
+        stereotype_type = request.args.get('stereotype_type')
+        trait = request.args.get('trait')
+        limit = request.args.get('limit', type=int, default=50)
+        offset = request.args.get('offset', type=int, default=0)
+
+        # Get all entries
+        entries = client.data
+
+        # Apply filters
+        if stereotype_type:
+            entries = [e for e in entries if e.get('emgsd_stereotype_type') == stereotype_type]
+        if trait:
+            entries = [e for e in entries if e.get('emgsd_trait') == trait]
+
+        # Apply pagination
+        total = len(entries)
+        entries = entries[offset:offset + limit]
+
+        return jsonify({
+            'entries': entries,
+            'total': total,
+            'offset': offset,
+            'limit': limit
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dataset/stats', methods=['GET'])
+def get_dataset_stats():
+    """Get dataset statistics"""
+    try:
+        from dataset_client import EMGSDDatasetClient
+
+        client = EMGSDDatasetClient()
+        stats = client.get_statistics()
+
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# FRONTEND ROUTES
+# =============================================================================
+
 @app.route('/<path:path>', methods=['GET'])
 def serve_frontend_routes(path):
     """
@@ -1300,11 +1484,20 @@ if __name__ == '__main__':
     print(f"Environment: {env}")
     print(f"Debug mode: {debug}")
     print("\nAPI endpoints:")
-    print("  POST /api/graph/expand - Expand graph from starter prompt (multi-layer)")
-    print("  POST /api/graph/evaluate - Evaluate bias using Gemini 2.5 Flash")
-    print("  POST /api/graph/expand-node - Expand specific node")
-    print("  POST /api/explain - Get SHAP explanations (HEARTS)")
-    print("  GET  /api/health - Health check")
+    print("  Graph Exploration:")
+    print("    POST /api/graph/expand - Expand graph from starter prompt (multi-layer)")
+    print("    POST /api/graph/evaluate - Evaluate bias using Gemini 2.5 Flash")
+    print("    POST /api/graph/expand-node - Expand specific node")
+    print("  Model Exploration:")
+    print("    GET  /api/models/available - Get available models (Bedrock + Ollama)")
+    print("    GET  /api/models/{model_id}/results - Get model evaluation results")
+    print("    GET  /api/models/{model_id}/result/{index} - Get specific result")
+    print("  Dataset Exploration:")
+    print("    GET  /api/dataset/entries - Get dataset entries")
+    print("    GET  /api/dataset/stats - Get dataset statistics")
+    print("  Other:")
+    print("    POST /api/explain - Get SHAP explanations (HEARTS)")
+    print("    GET  /api/health - Health check")
     print(f"\nServer running on port {port}")
     print(f"\nFeatures:")
     print(f"  Vertex AI (Llama + Gemini): {VERTEX_LLM_AVAILABLE}")
