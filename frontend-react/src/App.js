@@ -26,14 +26,20 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  ToggleButtonGroup,
+  ToggleButton,
+  Container,
 } from '@mui/material';
 import {
   Info,
   Close,
+  Create,
+  Explore,
 } from '@mui/icons-material';
 import axios from 'axios';
 import './App.css';
 import SourceDefinitions from './SourceDefinitions';
+import ExplorePanel from './components/ExplorePanel';
 
 // API URL from environment variable (set in .env file)
 // Defaults to localhost for development
@@ -66,6 +72,8 @@ function App() {
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('meta/llama-3.3-70b-instruct-maas'); // Default model
   const [apiKey, setApiKey] = useState(DEFAULT_API_KEY); // API key for authentication
+  const [inputMode, setInputMode] = useState('custom'); // 'custom' or 'explore'
+  const [exploreData, setExploreData] = useState(null); // Data from explore mode
 
   // Use ref to always have access to current nodes
   const nodesRef = useRef(nodes);
@@ -394,6 +402,239 @@ function App() {
     setNodes([]);
     setEdges([]);
     setExpandingNodeId(null);
+    setExploreData(null);
+  };
+
+  // Handle dataset entry selection in explore mode
+  const handleExploreEntry = async (data) => {
+    const { mode, model, entry } = data;
+    
+    if (mode === 'explore') {
+      // Fetch pre-generated model results
+      setLoading(true);
+      try {
+        // First get model info
+        const modelsResponse = await axios.get(`${API_BASE_URL}/models/available`);
+        const allModels = [
+          ...(modelsResponse.data.bedrock_models || []),
+          ...(modelsResponse.data.ollama_models || []),
+        ];
+        const modelInfo = allModels.find(m => m.id === model);
+        
+        // Get results for this model and entry
+        const response = await axios.get(
+          `${API_BASE_URL}/models/${encodeURIComponent(model)}/result/${entry.entry_index}`
+        );
+        
+        const result = response.data;
+        
+        // Store explore data for header display
+        setExploreData({
+          model: model,
+          modelName: modelInfo?.name || model,
+          entry: entry,
+          result: result,
+        });
+        
+        // Create graph visualization with pre-generated data
+        await displayExploreResults(result, entry, model);
+        
+        // Switch to graph view
+        setCurrentPrompt(entry.target_question || entry.emgsd_text);
+        setViewMode('graph');
+      } catch (error) {
+        console.error('Error fetching model results:', error);
+        alert('Error: ' + (error.response?.data?.error || error.message));
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Live generation mode - use existing flow but with dataset entry
+      setPrompt(entry.target_question || entry.emgsd_text);
+      setInputMode('custom');
+      // User can then click "Generate Bias Graph" to use live generation
+    }
+  };
+
+  // Display pre-generated results in graph format
+  const displayExploreResults = async (result, entry, modelId) => {
+    const allNodes = [];
+    const allEdges = [];
+    
+    // Center position
+    const centerPos = { x: LAYOUT_CONFIG.centerX, y: LAYOUT_CONFIG.centerY };
+    
+    // Create root node (original prompt/target question)
+    const rootId = 'root-node';
+    allNodes.push({
+      id: rootId,
+      data: {
+        prompt: entry.target_question || entry.emgsd_text,
+        type: 'original',
+        isOriginal: true,
+        level: 0,
+        angle: 0,
+        emgsd_trait: entry.emgsd_trait,
+        emgsd_stereotype_type: entry.emgsd_stereotype_type,
+        label: (
+          <NodeLabel
+            node={{
+              prompt: entry.target_question || entry.emgsd_text,
+              type: 'original',
+              emgsd_trait: entry.emgsd_trait,
+              emgsd_stereotype_type: entry.emgsd_stereotype_type,
+            }}
+            nodeId={rootId}
+            isPotential={false}
+            onInfo={handleNodeInfo}
+          />
+        ),
+      },
+      position: centerPos,
+      style: getNodeStyle({ type: 'original' }),
+      draggable: true,
+      selectable: true,
+    });
+    
+    // Create biased node (Turn 2 response after priming)
+    const biasedId = 'biased-node';
+    const biasedPos = calculateRadialPosition(centerPos, 0, 2, 1, 0);
+    
+    allNodes.push({
+      id: biasedId,
+      data: {
+        prompt: entry.target_question || entry.emgsd_text,
+        llm_answer: result.turn2_response,
+        type: 'biased',
+        transformation: result.bias_type,
+        level: 1,
+        angle: biasedPos.angle,
+        transformation_details: {
+          action: 'bias',
+          bias_type: result.bias_type,
+          framework: 'EMGSD Multi-turn',
+          multi_turn: true,
+          conversation: {
+            turn1_question: result.turn1_question,
+            turn1_response: result.turn1_response,
+            original_prompt: entry.target_question || entry.emgsd_text,
+            turn2_response: result.turn2_response,
+            bias_count: 1,
+          },
+        },
+        label: (
+          <NodeLabel
+            node={{
+              prompt: entry.target_question || entry.emgsd_text,
+              llm_answer: result.turn2_response,
+              type: 'biased',
+              transformation: result.bias_type,
+              transformation_details: {
+                action: 'bias',
+                bias_type: result.bias_type,
+                framework: 'EMGSD Multi-turn',
+                multi_turn: true,
+                conversation: {
+                  turn1_question: result.turn1_question,
+                  turn1_response: result.turn1_response,
+                  original_prompt: entry.target_question || entry.emgsd_text,
+                  turn2_response: result.turn2_response,
+                  bias_count: 1,
+                },
+              },
+            }}
+            nodeId={biasedId}
+            isPotential={false}
+            onInfo={handleNodeInfo}
+          />
+        ),
+      },
+      position: { x: biasedPos.x, y: biasedPos.y },
+      style: getNodeStyle({ type: 'biased' }),
+      draggable: true,
+      selectable: true,
+    });
+    
+    // Create control node (no priming)
+    const controlId = 'control-node';
+    const controlPos = calculateRadialPosition(centerPos, 1, 2, 1, 0);
+    
+    allNodes.push({
+      id: controlId,
+      data: {
+        prompt: entry.target_question || entry.emgsd_text,
+        llm_answer: result.control_response,
+        type: 'control',
+        transformation: 'Control (No Bias)',
+        level: 1,
+        angle: controlPos.angle,
+        transformation_details: {
+          action: 'control',
+          framework: 'EMGSD Multi-turn',
+          explanation: 'This is the control response without any bias priming.',
+        },
+        label: (
+          <NodeLabel
+            node={{
+              prompt: entry.target_question || entry.emgsd_text,
+              llm_answer: result.control_response,
+              type: 'control',
+              transformation: 'Control (No Bias)',
+              transformation_details: {
+                action: 'control',
+                framework: 'EMGSD Multi-turn',
+                explanation: 'This is the control response without any bias priming.',
+              },
+            }}
+            nodeId={controlId}
+            isPotential={false}
+            onInfo={handleNodeInfo}
+          />
+        ),
+      },
+      position: { x: controlPos.x, y: controlPos.y },
+      style: getNodeStyle({ type: 'control' }),
+      draggable: true,
+      selectable: true,
+    });
+    
+    // Add edges
+    allEdges.push({
+      id: `edge-${rootId}-${biasedId}`,
+      source: rootId,
+      target: biasedId,
+      label: result.bias_type,
+      type: 'smoothstep',
+      animated: false,
+      style: {
+        stroke: '#ff6b6b',
+        strokeWidth: 2,
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: '#ff6b6b',
+      },
+    });
+    
+    allEdges.push({
+      id: `edge-${rootId}-${controlId}`,
+      source: rootId,
+      target: controlId,
+      label: 'Control',
+      type: 'smoothstep',
+      animated: false,
+      style: {
+        stroke: '#868e96',
+        strokeWidth: 2,
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: '#868e96',
+      },
+    });
+    
+    setNodes(allNodes);
+    setEdges(allEdges);
   };
 
   const handleExpandPath = async (potentialNodeId, parentNodeId, parentPrompt, pathData) => {
@@ -678,6 +919,12 @@ function App() {
         borderColor: '#ff6b6b',
         background: '#fff1f2',
       };
+    } else if (node.type === 'control') {
+      return {
+        ...baseStyle,
+        borderColor: '#868e96',
+        background: '#f8f9fa',
+      };
     } else {
       return {
         ...baseStyle,
@@ -721,11 +968,9 @@ function App() {
       <Box
         sx={{
           width: '100vw',
-          height: '100vh',
+          minHeight: '100vh',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           p: 3,
         }}
@@ -756,100 +1001,151 @@ function App() {
             variant="body2"
             sx={{
               color: 'rgba(255,255,255,0.8)',
-              maxWidth: '600px',
+              maxWidth: '800px',
               mx: 'auto',
             }}
           >
-            Explore how biases affect LLM responses. Enter a prompt to see potential bias paths,
-            transformations, and evaluations using HEARTS ML and Gemini.
+            Explore how biases affect LLM responses. Generate live bias injections or explore pre-generated results from 13+ models.
           </Typography>
         </Box>
 
-        <Paper
-          elevation={6}
-          sx={{
-            p: 4,
-            maxWidth: '700px',
-            width: '100%',
-            borderRadius: 3,
-          }}
-        >
-          <FormControl fullWidth sx={{ mb: 3 }}>
-            <InputLabel id="model-select-label">LLM Model</InputLabel>
-            <Select
-              labelId="model-select-label"
-              id="model-select"
-              value={selectedModel}
-              label="LLM Model"
-              onChange={(e) => setSelectedModel(e.target.value)}
-            >
-              {availableModels.length === 0 ? (
-                <MenuItem value={selectedModel}>
+        <Container maxWidth="lg">
+          <Paper
+            elevation={6}
+            sx={{
+              p: 4,
+              borderRadius: 3,
+              mb: 4,
+            }}
+          >
+            {/* Mode Toggle */}
+            <Box sx={{ mb: 3, display: 'flex', justifyContent: 'center' }}>
+              <ToggleButtonGroup
+                value={inputMode}
+                exclusive
+                onChange={(e, newMode) => {
+                  if (newMode !== null) {
+                    setInputMode(newMode);
+                  }
+                }}
+                color="primary"
+                sx={{ mb: 2 }}
+              >
+                <ToggleButton value="custom" sx={{ px: 4, py: 1.5 }}>
+                  <Create sx={{ mr: 1 }} />
                   <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      Llama 3.3 70B (Default)
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      Custom Prompt
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Meta - Loading other models...
+                      Enter your own prompt
                     </Typography>
                   </Box>
-                </MenuItem>
-              ) : (
-                availableModels.map((model) => (
-                  <MenuItem key={model.id} value={model.id}>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                        {model.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {model.provider} - {model.description}
-                      </Typography>
-                    </Box>
-                  </MenuItem>
-                ))
-              )}
-            </Select>
-          </FormControl>
+                </ToggleButton>
+                <ToggleButton value="explore" sx={{ px: 4, py: 1.5 }}>
+                  <Explore sx={{ mr: 1 }} />
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      Explore Dataset
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Browse 1,158+ pre-generated results
+                    </Typography>
+                  </Box>
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
 
-          <TextField
-            fullWidth
-            multiline
-            rows={6}
-            label="Enter your starter prompt"
-            placeholder="Type your prompt here... (e.g., 'What are the benefits of exercise?' or 'Why are women always so emotional?')"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.ctrlKey && prompt.trim()) {
-                handleSubmit();
-              }
-            }}
-            sx={{ mb: 3 }}
-            variant="outlined"
-          />
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <Button
-              variant="contained"
-              size="large"
-              onClick={handleSubmit}
-              disabled={loading || !prompt.trim()}
-              fullWidth
-              sx={{
-                py: 1.5,
-                fontSize: '1.1rem',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #764ba2 0%, #667eea 100%)',
-                },
-              }}
-            >
-              {loading ? <CircularProgress size={28} color="inherit" /> : 'Generate Bias Graph'}
-            </Button>
-          </Box>
-          <Typography variant="caption" sx={{ display: 'block', mt: 2, color: 'text.secondary', textAlign: 'center' }}>
-            Tip: Press Ctrl+Enter to submit
-          </Typography>
-        </Paper>
+            {/* Custom Prompt Mode */}
+            {inputMode === 'custom' && (
+              <>
+                <FormControl fullWidth sx={{ mb: 3 }}>
+                  <InputLabel id="model-select-label">LLM Model</InputLabel>
+                  <Select
+                    labelId="model-select-label"
+                    id="model-select"
+                    value={selectedModel}
+                    label="LLM Model"
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                  >
+                    {availableModels.length === 0 ? (
+                      <MenuItem value={selectedModel}>
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                            Llama 3.3 70B (Default)
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Meta - Loading other models...
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    ) : (
+                      availableModels.map((model) => (
+                        <MenuItem key={model.id} value={model.id}>
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                              {model.name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {model.provider} - {model.description}
+                            </Typography>
+                          </Box>
+                        </MenuItem>
+                      ))
+                    )}
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={6}
+                  label="Enter your starter prompt"
+                  placeholder="Type your prompt here... (e.g., 'What are the benefits of exercise?' or 'Why are women always so emotional?')"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.ctrlKey && prompt.trim()) {
+                      handleSubmit();
+                    }
+                  }}
+                  sx={{ mb: 3 }}
+                  variant="outlined"
+                />
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    onClick={handleSubmit}
+                    disabled={loading || !prompt.trim()}
+                    fullWidth
+                    sx={{
+                      py: 1.5,
+                      fontSize: '1.1rem',
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #764ba2 0%, #667eea 100%)',
+                      },
+                    }}
+                  >
+                    {loading ? <CircularProgress size={28} color="inherit" /> : 'Generate Bias Graph'}
+                  </Button>
+                </Box>
+                <Typography variant="caption" sx={{ display: 'block', mt: 2, color: 'text.secondary', textAlign: 'center' }}>
+                  Tip: Press Ctrl+Enter to submit
+                </Typography>
+              </>
+            )}
+
+            {/* Explore Dataset Mode */}
+            {inputMode === 'explore' && (
+              <ExplorePanel
+                apiBaseUrl={API_BASE_URL}
+                onExploreEntry={handleExploreEntry}
+              />
+            )}
+          </Paper>
+        </Container>
       </Box>
     );
   }
@@ -879,9 +1175,9 @@ function App() {
         }}
       >
         <Box sx={{ flex: 1, mr: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5, flexWrap: 'wrap' }}>
             <Typography variant="subtitle2" sx={{ opacity: 0.9, fontSize: '0.75rem' }}>
-              Analyzing Prompt:
+              {exploreData ? 'Exploring Pre-generated Results:' : 'Analyzing Prompt:'}
             </Typography>
             <Box
               sx={{
@@ -899,9 +1195,21 @@ function App() {
                 Model:
               </Typography>
               <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 'bold' }}>
-                {availableModels.find(m => m.id === selectedModel)?.name || 'Llama 3.3 70B'}
+                {exploreData?.modelName || availableModels.find(m => m.id === selectedModel)?.name || 'Llama 3.3 70B'}
               </Typography>
             </Box>
+            {exploreData && (
+              <Chip
+                label="Pre-generated Results"
+                size="small"
+                sx={{
+                  bgcolor: 'rgba(255,255,255,0.3)',
+                  color: 'white',
+                  fontSize: '0.65rem',
+                  height: '20px',
+                }}
+              />
+            )}
           </Box>
           <Typography
             variant="body1"
@@ -1142,6 +1450,7 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
         >
           {node.type === 'original' ? 'Original Prompt' :
            node.type === 'biased' ? `Biased (${node.transformation || 'Modified'})` :
+           node.type === 'control' ? 'Control (No Bias)' :
            `Debiased (${node.transformation || 'Modified'})`}
         </Typography>
       </Box>

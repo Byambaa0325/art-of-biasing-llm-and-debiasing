@@ -103,3 +103,4 @@ print("  ENABLE_HEARTS=true (default: true)")
 print("  HEARTS_LAZY_LOAD=true (default: true - loads on first use)")
 print("  HEARTS_LOCAL_FILES_ONLY=false (default: false - download if needed)")
 print("  HF_HOME=<path> (optional: set HuggingFace cache directory)")
+

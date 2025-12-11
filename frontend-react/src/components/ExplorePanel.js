@@ -23,6 +23,22 @@ const ExplorePanel = ({ apiBaseUrl, onExploreEntry }) => {
   const [selectedModelInfo, setSelectedModelInfo] = useState(null);
   const [models, setModels] = useState({ bedrock_models: [], ollama_models: [] });
 
+  // Fetch models on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/models/available`);
+        if (response.ok) {
+          const data = await response.json();
+          setModels(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch models:', error);
+      }
+    };
+    fetchModels();
+  }, [apiBaseUrl]);
+
   useEffect(() => {
     // Set default model when models are loaded
     if (models.bedrock_models.length > 0 && !selectedModel) {
@@ -30,7 +46,7 @@ const ExplorePanel = ({ apiBaseUrl, onExploreEntry }) => {
     } else if (models.ollama_models.length > 0 && !selectedModel) {
       setSelectedModel(models.ollama_models[0].id);
     }
-  }, [models]);
+  }, [models, selectedModel]);
 
   useEffect(() => {
     // Update selected model info
@@ -45,7 +61,7 @@ const ExplorePanel = ({ apiBaseUrl, onExploreEntry }) => {
     if (modelInfo && !modelInfo.supports_live_generation && mode === 'live') {
       setMode('explore');
     }
-  }, [selectedModel, models]);
+  }, [selectedModel, models, mode]);
 
   const handleModeChange = (newMode) => {
     setMode(newMode);

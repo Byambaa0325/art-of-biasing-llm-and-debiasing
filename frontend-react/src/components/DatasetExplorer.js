@@ -75,7 +75,12 @@ const DatasetExplorer = ({ onSelectEntry, apiBaseUrl }) => {
       if (traitFilter) params.trait = traitFilter;
 
       const response = await axios.get(`${apiBaseUrl}/dataset/entries`, { params });
-      setEntries(response.data.entries);
+      // Ensure each entry has an entry_index (use array index if not present)
+      const entriesWithIndex = response.data.entries.map((entry, idx) => ({
+        ...entry,
+        entry_index: entry.entry_index !== undefined ? entry.entry_index : (page * rowsPerPage + idx),
+      }));
+      setEntries(entriesWithIndex);
       setTotal(response.data.total);
     } catch (err) {
       console.error('Failed to fetch entries:', err);
