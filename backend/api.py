@@ -1283,16 +1283,17 @@ def get_available_models():
     - Ollama models (static benchmark only)
     """
     try:
-        from model_results_client import ModelResultsClient
+        from drift_results_client import DriftResultsClient
 
-        client = ModelResultsClient()
+        client = DriftResultsClient()
 
         bedrock_models = []
         for model_id in client.get_bedrock_models():
             meta = client.get_model_metadata(model_id)
+            display_id = meta.get('display_id', model_id)
             bedrock_models.append({
-                'id': model_id,
-                'name': model_id.split('/')[-1] if '/' in model_id else model_id,
+                'id': display_id,  # Use frontend-friendly ID
+                'name': display_id.split('/')[-1] if '/' in display_id else display_id,
                 'type': 'bedrock',
                 'supports_live_generation': True,
                 'total_entries': meta['total_entries']
@@ -1301,9 +1302,10 @@ def get_available_models():
         ollama_models = []
         for model_id in client.get_ollama_models():
             meta = client.get_model_metadata(model_id)
+            display_id = meta.get('display_id', model_id)
             ollama_models.append({
-                'id': model_id,
-                'name': model_id,
+                'id': display_id,  # Use frontend-friendly ID
+                'name': display_id,
                 'type': 'ollama',
                 'supports_live_generation': False,
                 'total_entries': meta['total_entries']
@@ -1330,9 +1332,9 @@ def get_model_results(model_id):
     - offset: Offset for pagination
     """
     try:
-        from model_results_client import ModelResultsClient
+        from drift_results_client import DriftResultsClient
 
-        client = ModelResultsClient()
+        client = DriftResultsClient()
 
         # Get query parameters
         bias_type = request.args.get('bias_type')
@@ -1373,15 +1375,41 @@ def get_model_result_by_index(model_id, entry_index):
     Get a specific result entry by index.
     """
     try:
-        from model_results_client import ModelResultsClient
+        from drift_results_client import DriftResultsClient
 
-        client = ModelResultsClient()
+        client = DriftResultsClient()
         result = client.get_result_by_index(model_id, entry_index)
 
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/models/<path:model_id>/results/target/<path:target_question>', methods=['GET'])
+def get_model_results_by_target(model_id, target_question):
+    """
+    Get all bias type results for a specific target question.
+
+    Returns results for all available bias types for the given target question.
+    """
+    try:
+        from drift_results_client import DriftResultsClient
+
+        client = DriftResultsClient()
+        results = client.get_model_results(model_id)
+        
+        # Filter by target question (normalize comparison)
+        target_normalized = target_question.strip().lower()
+        matching_results = [
+            r for r in results 
+            if r.get('target_question', '').strip().lower() == target_normalized
+        ]
+        
         return jsonify({
             'model_id': model_id,
-            'entry_index': entry_index,
-            'result': result
+            'target_question': target_question,
+            'results': matching_results,
+            'count': len(matching_results)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1409,8 +1437,8 @@ def get_dataset_entries():
         limit = request.args.get('limit', type=int, default=50)
         offset = request.args.get('offset', type=int, default=0)
 
-        # Get all entries
-        entries = client.data
+        # Get all entries - limit to first 100 (only these have inference results)
+        entries = client.data[:100]
 
         # Apply filters
         if stereotype_type:
@@ -1434,12 +1462,19 @@ def get_dataset_entries():
 
 @app.route('/api/dataset/stats', methods=['GET'])
 def get_dataset_stats():
-    """Get dataset statistics"""
+    """Get dataset statistics (limited to first 100 entries with inference results)"""
     try:
         from dataset_client import EMGSDDatasetClient
 
         client = EMGSDDatasetClient()
+        # Limit client data to first 100 entries
+        original_data = client.data
+        client.data = client.data[:100]
         stats = client.get_statistics()
+        client.data = original_data  # Restore original data
+        
+        # Add note about limitation
+        stats['note'] = 'Statistics based on first 100 entries (with inference results)'
 
         return jsonify(stats)
     except Exception as e:

@@ -104,7 +104,7 @@ function App() {
   const LAYOUT_CONFIG = {
     centerX: 800,
     centerY: 400,
-    radiusIncrement: 350,  // Distance between levels
+    radiusIncrement: 500,  // Distance between levels (increased for better spacing)
     minAngleSeparation: 0.3,  // Minimum angle between siblings
   };
 
@@ -114,16 +114,30 @@ function App() {
 
     // Calculate angle spread based on number of children
     let angleSpread = Math.PI * 1.5; // 270 degrees by default
+    let useFullCircle = false;
+    
     if (totalChildren === 1) {
       angleSpread = 0;
     } else if (totalChildren === 2) {
       angleSpread = Math.PI; // 180 degrees
+    } else if (totalChildren >= 6) {
+      // For many children (6+), use full circle for better spacing
+      angleSpread = Math.PI * 2; // 360 degrees
+      useFullCircle = true;
     }
 
     // Calculate angle for this child
-    const startAngle = parentAngle - angleSpread / 2;
-    const angleStep = totalChildren > 1 ? angleSpread / (totalChildren - 1) : 0;
-    const angle = startAngle + (angleStep * childIndex);
+    let angle;
+    if (useFullCircle) {
+      // Distribute evenly around full circle
+      const angleStep = angleSpread / totalChildren;
+      angle = parentAngle + (angleStep * childIndex);
+    } else {
+      // Spread within the angle range
+      const startAngle = parentAngle - angleSpread / 2;
+      const angleStep = totalChildren > 1 ? angleSpread / (totalChildren - 1) : 0;
+      angle = startAngle + (angleStep * childIndex);
+    }
 
     // Calculate position
     const x = parentPos.x + radius * Math.cos(angle);
@@ -410,7 +424,7 @@ function App() {
     const { mode, model, entry } = data;
     
     if (mode === 'explore') {
-      // Fetch pre-generated model results
+      // Fetch and display all cached results immediately (already expanded)
       setLoading(true);
       try {
         // First get model info
@@ -421,29 +435,30 @@ function App() {
         ];
         const modelInfo = allModels.find(m => m.id === model);
         
-        // Get results for this model and entry
+        // Fetch all bias type results for this target question
+        const targetQuestion = entry.target_question || entry.emgsd_text;
         const response = await axios.get(
-          `${API_BASE_URL}/models/${encodeURIComponent(model)}/result/${entry.entry_index}`
+          `${API_BASE_URL}/models/${encodeURIComponent(model)}/results/target/${encodeURIComponent(targetQuestion)}`
         );
         
-        const result = response.data;
+        const allResults = response.data.results || [];
         
         // Store explore data for header display
         setExploreData({
           model: model,
           modelName: modelInfo?.name || model,
           entry: entry,
-          result: result,
+          results: allResults,
         });
         
-        // Create graph visualization with pre-generated data
-        await displayExploreResults(result, entry, model);
+        // Display all cached results as expanded nodes immediately
+        await displayCachedResultsExpanded(entry, model, allResults);
         
         // Switch to graph view
-        setCurrentPrompt(entry.target_question || entry.emgsd_text);
+        setCurrentPrompt(targetQuestion);
         setViewMode('graph');
       } catch (error) {
-        console.error('Error fetching model results:', error);
+        console.error('Error loading cached results:', error);
         alert('Error: ' + (error.response?.data?.error || error.message));
       } finally {
         setLoading(false);
@@ -456,8 +471,8 @@ function App() {
     }
   };
 
-  // Display pre-generated results in graph format
-  const displayExploreResults = async (result, entry, modelId) => {
+  // Display all cached results as already-expanded nodes
+  const displayCachedResultsExpanded = async (entry, modelId, allResults) => {
     const allNodes = [];
     const allEdges = [];
     
@@ -465,25 +480,39 @@ function App() {
     const centerPos = { x: LAYOUT_CONFIG.centerX, y: LAYOUT_CONFIG.centerY };
     
     // Create root node (original prompt/target question)
-    const rootId = 'root-node';
+    const rootId = 'root-explore';
+    const targetPrompt = entry.target_question || entry.emgsd_text;
+    
+    // Get control data from first result (all results have same control response for same target question)
+    const firstResult = allResults.length > 0 ? allResults[0] : null;
+    
+    const originalNode = {
+      prompt: targetPrompt,
+      type: 'original',
+      emgsd_trait: entry.emgsd_trait,
+      emgsd_stereotype_type: entry.emgsd_stereotype_type,
+      // Include control information in root node
+      control_response: firstResult?.control_response,
+      hearts_evaluation: firstResult?.hearts_evaluation ? {
+        available: true,
+        // Try multiple possible field names for control score
+        control_score: firstResult.hearts_evaluation.control_score || 
+                      firstResult.hearts_evaluation.control_stereotype_score ||
+                      0,
+        control_is_stereotype: firstResult.hearts_evaluation.control_is_stereotype || false,
+      } : null,
+    };
+    
     allNodes.push({
       id: rootId,
       data: {
-        prompt: entry.target_question || entry.emgsd_text,
-        type: 'original',
+        ...originalNode,
         isOriginal: true,
         level: 0,
         angle: 0,
-        emgsd_trait: entry.emgsd_trait,
-        emgsd_stereotype_type: entry.emgsd_stereotype_type,
         label: (
           <NodeLabel
-            node={{
-              prompt: entry.target_question || entry.emgsd_text,
-              type: 'original',
-              emgsd_trait: entry.emgsd_trait,
-              emgsd_stereotype_type: entry.emgsd_stereotype_type,
-            }}
+            node={originalNode}
             nodeId={rootId}
             isPotential={false}
             onInfo={handleNodeInfo}
@@ -496,146 +525,106 @@ function App() {
       selectable: true,
     });
     
-    // Create biased node (Turn 2 response after priming)
-    const biasedId = 'biased-node';
-    const biasedPos = calculateRadialPosition(centerPos, 0, 2, 1, 0);
-    
-    allNodes.push({
-      id: biasedId,
-      data: {
-        prompt: entry.target_question || entry.emgsd_text,
+    // Create expanded nodes for each cached result (already showing full data)
+    allResults.forEach((result, index) => {
+      const biasedId = `biased-${result.bias_type}`;
+      const { x, y, angle } = calculateRadialPosition(
+        centerPos,
+        index,
+        allResults.length,
+        1,
+        0
+      );
+      
+      // Format bias type name for display
+      const biasLabel = result.bias_type
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+      
+      const biasedNode = {
+        prompt: targetPrompt,
         llm_answer: result.turn2_response,
         type: 'biased',
-        transformation: result.bias_type,
-        level: 1,
-        angle: biasedPos.angle,
+        transformation: biasLabel,
         transformation_details: {
           action: 'bias',
           bias_type: result.bias_type,
-          framework: 'EMGSD Multi-turn',
+          framework: 'EMGSD Multi-turn (Cached)',
           multi_turn: true,
           conversation: {
             turn1_question: result.turn1_question,
             turn1_response: result.turn1_response,
-            original_prompt: entry.target_question || entry.emgsd_text,
+            original_prompt: targetPrompt,
             turn2_response: result.turn2_response,
+            control_response: result.control_response,
             bias_count: 1,
           },
         },
-        label: (
-          <NodeLabel
-            node={{
-              prompt: entry.target_question || entry.emgsd_text,
-              llm_answer: result.turn2_response,
-              type: 'biased',
-              transformation: result.bias_type,
-              transformation_details: {
-                action: 'bias',
-                bias_type: result.bias_type,
-                framework: 'EMGSD Multi-turn',
-                multi_turn: true,
-                conversation: {
-                  turn1_question: result.turn1_question,
-                  turn1_response: result.turn1_response,
-                  original_prompt: entry.target_question || entry.emgsd_text,
-                  turn2_response: result.turn2_response,
-                  bias_count: 1,
-                },
-              },
-            }}
-            nodeId={biasedId}
-            isPotential={false}
-            onInfo={handleNodeInfo}
-          />
-        ),
-      },
-      position: { x: biasedPos.x, y: biasedPos.y },
-      style: getNodeStyle({ type: 'biased' }),
-      draggable: true,
-      selectable: true,
-    });
-    
-    // Create control node (no priming)
-    const controlId = 'control-node';
-    const controlPos = calculateRadialPosition(centerPos, 1, 2, 1, 0);
-    
-    allNodes.push({
-      id: controlId,
-      data: {
-        prompt: entry.target_question || entry.emgsd_text,
-        llm_answer: result.control_response,
-        type: 'control',
-        transformation: 'Control (No Bias)',
-        level: 1,
-        angle: controlPos.angle,
-        transformation_details: {
-          action: 'control',
-          framework: 'EMGSD Multi-turn',
-          explanation: 'This is the control response without any bias priming.',
+        // HEARTS evaluation scores from drift analysis
+        hearts_evaluation: result.hearts_evaluation ? {
+          available: true,
+          is_stereotype: result.hearts_evaluation.bias_is_stereotype,
+          prediction: result.hearts_evaluation.bias_is_stereotype ? 'Stereotype' : 'Not Stereotype',
+          confidence: result.hearts_evaluation.bias_stereotype_score,
+          drift_score: result.hearts_evaluation.drift_score,
+          raw_drift: result.hearts_evaluation.raw_drift,
+          significant_drift: result.hearts_evaluation.significant_drift,
+          framework: result.hearts_evaluation.framework,
+          // Include control scores for comparison
+          control_is_stereotype: result.hearts_evaluation.control_is_stereotype,
+          control_score: result.hearts_evaluation.control_stereotype_score,
+        } : null,
+        // Similarity metrics
+        similarity_metrics: result.similarity_metrics,
+      };
+      
+      allNodes.push({
+        id: biasedId,
+        data: {
+          ...biasedNode,
+          isActual: true,
+          level: 1,
+          angle: angle,
+          label: (
+            <NodeLabel
+              node={biasedNode}
+              nodeId={biasedId}
+              isPotential={false}
+              onInfo={handleNodeInfo}
+            />
+          ),
         },
-        label: (
-          <NodeLabel
-            node={{
-              prompt: entry.target_question || entry.emgsd_text,
-              llm_answer: result.control_response,
-              type: 'control',
-              transformation: 'Control (No Bias)',
-              transformation_details: {
-                action: 'control',
-                framework: 'EMGSD Multi-turn',
-                explanation: 'This is the control response without any bias priming.',
-              },
-            }}
-            nodeId={controlId}
-            isPotential={false}
-            onInfo={handleNodeInfo}
-          />
-        ),
-      },
-      position: { x: controlPos.x, y: controlPos.y },
-      style: getNodeStyle({ type: 'control' }),
-      draggable: true,
-      selectable: true,
-    });
-    
-    // Add edges
-    allEdges.push({
-      id: `edge-${rootId}-${biasedId}`,
-      source: rootId,
-      target: biasedId,
-      label: result.bias_type,
-      type: 'smoothstep',
-      animated: false,
-      style: {
-        stroke: '#ff6b6b',
-        strokeWidth: 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: '#ff6b6b',
-      },
-    });
-    
-    allEdges.push({
-      id: `edge-${rootId}-${controlId}`,
-      source: rootId,
-      target: controlId,
-      label: 'Control',
-      type: 'smoothstep',
-      animated: false,
-      style: {
-        stroke: '#868e96',
-        strokeWidth: 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: '#868e96',
-      },
+        position: { x, y },
+        style: getNodeStyle({ type: 'biased' }),
+        draggable: true,
+        selectable: true,
+      });
+      
+      // Add solid edge from root to biased node
+      allEdges.push({
+        id: `edge-${rootId}-${biasedId}`,
+        source: rootId,
+        target: biasedId,
+        label: biasLabel,
+        type: 'smoothstep',
+        animated: false,
+        style: {
+          stroke: '#ff6b6b',
+          strokeWidth: 2,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: '#ff6b6b',
+        },
+      });
     });
     
     setNodes(allNodes);
     setEdges(allEdges);
   };
+
+  // Note: handleExpandCachedPath removed - cached results are now shown expanded by default
 
   const handleExpandPath = async (potentialNodeId, parentNodeId, parentPrompt, pathData) => {
     // Prevent multiple clicks on the same node
@@ -1472,6 +1461,65 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
         {node.prompt}
       </Typography>
 
+      {/* Control Response for Original Node (Dataset Explorer) */}
+      {node.type === 'original' && node.control_response && (
+        <Box sx={{ mb: 1.5, width: '100%', overflow: 'hidden' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              display: 'block',
+              mb: 0.5,
+              fontWeight: 'bold',
+              color: 'primary.main',
+              fontSize: '10px',
+            }}
+          >
+            Control Response (No Priming):
+          </Typography>
+          <Paper
+            sx={{
+              p: 1.5,
+              bgcolor: 'grey.50',
+              fontSize: '11px',
+              maxHeight: '150px',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              width: '100%',
+              boxSizing: 'border-box',
+              borderLeft: '3px solid #1976d2',
+            }}
+            elevation={0}
+          >
+            <Typography
+              variant="body2"
+              sx={{
+                display: 'block',
+                wordBreak: 'break-word',
+                overflowWrap: 'break-word',
+                whiteSpace: 'pre-wrap',
+                margin: 0,
+              }}
+            >
+              {node.control_response}
+            </Typography>
+          </Paper>
+          {node.hearts_evaluation?.control_score !== undefined && node.hearts_evaluation.control_score !== null && !isNaN(node.hearts_evaluation.control_score) && (
+            <Box sx={{ mt: 0.5 }}>
+              <Chip
+                label={`HEARTS: ${(node.hearts_evaluation.control_score * 100).toFixed(1)}% ${node.hearts_evaluation.control_is_stereotype ? '(Stereotype)' : '(Not Stereotype)'}`}
+                size="small"
+                sx={{ 
+                  fontSize: '9px', 
+                  height: '18px',
+                  bgcolor: node.hearts_evaluation.control_is_stereotype ? '#ffebee' : '#e8f5e9',
+                  color: node.hearts_evaluation.control_is_stereotype ? '#c00' : '#060',
+                }}
+              />
+            </Box>
+          )}
+        </Box>
+      )}
+
       {/* LLM Answer */}
       {node.llm_answer && (
         <Box sx={{ mb: 1.5, width: '100%', overflow: 'hidden' }}>
@@ -1506,8 +1554,8 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
 
       {/* Main Evaluation Badges - Always Visible */}
       <Box sx={{ mb: 1, width: '100%', display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-        {/* HEARTS Badge */}
-        {node.hearts_evaluation?.available && (
+        {/* HEARTS Badge - Only for biased/debiased nodes, NOT for original nodes */}
+        {node.type !== 'original' && node.hearts_evaluation?.available && node.hearts_evaluation.confidence !== undefined && (
           <Chip
             label={`HEARTS: ${node.hearts_evaluation.prediction || 'Unknown'} (${(node.hearts_evaluation.confidence * 100).toFixed(0)}%)`}
             size="small"
@@ -1521,7 +1569,25 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
               border: '1px solid',
               color: node.hearts_evaluation.is_stereotype ? '#c00' : '#060',
             }}
-            title={`HEARTS ALBERT-v2 stereotype detection - Confidence: ${(node.hearts_evaluation.confidence * 100).toFixed(0)}%`}
+            title={`HEARTS stereotype detection - Score: ${(node.hearts_evaluation.confidence * 100).toFixed(0)}%${node.hearts_evaluation.drift_score !== undefined ? `, Drift: ${node.hearts_evaluation.drift_score.toFixed(3)}` : ''}`}
+          />
+        )}
+        
+        {/* Drift Score Badge (only for dataset explorer biased nodes) */}
+        {node.type === 'biased' && node.hearts_evaluation?.drift_score !== undefined && (
+          <Chip
+            label={`Drift: ${node.hearts_evaluation.drift_score >= 0 ? '+' : ''}${node.hearts_evaluation.drift_score.toFixed(3)}`}
+            size="small"
+            sx={{ 
+              fontSize: '9px', 
+              height: '20px',
+              fontWeight: 'bold',
+              bgcolor: node.hearts_evaluation.drift_score > 0 ? '#fff4e6' : '#e6f7ff',
+              borderColor: node.hearts_evaluation.drift_score > 0 ? '#ff9800' : '#2196f3',
+              border: '1px solid',
+              color: node.hearts_evaluation.drift_score > 0 ? '#e65100' : '#1565c0',
+            }}
+            title={`Drift from control: ${node.hearts_evaluation.drift_score.toFixed(3)} (${node.hearts_evaluation.significant_drift ? 'Significant' : 'Not significant'})`}
           />
         )}
 
@@ -1883,6 +1949,41 @@ function NodeDialog({ open, onClose, node, evaluating }) {
           </Paper>
         </Box>
 
+        {/* Control Response for Original Node (Dataset Explorer) */}
+        {node.type === 'original' && node.control_response && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Control Response (No Priming):
+            </Typography>
+            <Paper sx={{ p: 2, bgcolor: 'grey.50', borderLeft: '4px solid #1976d2' }}>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {node.control_response}
+              </Typography>
+              {node.hearts_evaluation?.control_score !== undefined && node.hearts_evaluation.control_score !== null && !isNaN(node.hearts_evaluation.control_score) && (
+                <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
+                    HEARTS Stereotype Detection:
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip
+                      label={`${(node.hearts_evaluation.control_score * 100).toFixed(1)}% stereotype score`}
+                      size="small"
+                      sx={{ 
+                        bgcolor: node.hearts_evaluation.control_is_stereotype ? '#ffebee' : '#e8f5e9',
+                        color: node.hearts_evaluation.control_is_stereotype ? '#c00' : '#060',
+                        fontWeight: 'bold'
+                      }}
+                    />
+                    <Typography variant="caption">
+                      {node.hearts_evaluation.control_is_stereotype ? '(Stereotype Detected)' : '(No Stereotype)'}
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+            </Paper>
+          </Box>
+        )}
+
         {/* HEARTS, Gemini, and Claude Evaluations */}
         {(node.hearts_evaluation?.available || node.gemini_evaluation?.available || node.claude_evaluation?.available) && (
           <Box sx={{ mb: 2 }}>
@@ -1894,14 +1995,76 @@ function NodeDialog({ open, onClose, node, evaluating }) {
             {node.hearts_evaluation?.available && (
               <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'blue.50' }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                  HEARTS ALBERT-v2
+                  HEARTS Stereotype Detection
                 </Typography>
-                <Typography variant="body2" sx={{ mb: 0.5 }}>
-                  Prediction: {node.hearts_evaluation.prediction || 'Unknown'} 
-                  ({(node.hearts_evaluation.confidence * 100).toFixed(0)}% confidence)
-                </Typography>
+                
+                {node.hearts_evaluation.drift_score !== undefined ? (
+                  <Box>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 1, fontWeight: 'bold', color: 'primary.main' }}>
+                      Bias Drift Analysis:
+                    </Typography>
+                    
+                    {/* Control Response Score */}
+                    <Box sx={{ mb: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.3, fontWeight: 'bold' }}>
+                        Control (No Priming):
+                      </Typography>
+                      <Typography variant="body2" sx={{ mb: 0 }}>
+                        {(node.hearts_evaluation.control_score * 100).toFixed(1)}% stereotype score
+                        <Typography component="span" sx={{ ml: 1, fontWeight: 'bold', color: node.hearts_evaluation.control_is_stereotype ? 'error.main' : 'success.main' }}>
+                          ({node.hearts_evaluation.control_is_stereotype ? '✓ Stereotype' : '✗ Not Stereotype'})
+                        </Typography>
+                      </Typography>
+                    </Box>
+                    
+                    {/* Biased Response Score */}
+                    <Box sx={{ mb: 1, p: 1, bgcolor: node.hearts_evaluation.is_stereotype ? '#ffebee' : '#e8f5e9', borderRadius: 1 }}>
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.3, fontWeight: 'bold' }}>
+                        After Priming:
+                      </Typography>
+                      <Typography variant="body2" sx={{ mb: 0 }}>
+                        {(node.hearts_evaluation.confidence * 100).toFixed(1)}% stereotype score
+                        <Typography component="span" sx={{ ml: 1, fontWeight: 'bold', color: node.hearts_evaluation.is_stereotype ? 'error.main' : 'success.main' }}>
+                          ({node.hearts_evaluation.is_stereotype ? '✓ Stereotype' : '✗ Not Stereotype'})
+                        </Typography>
+                      </Typography>
+                    </Box>
+                    
+                    {/* Drift Score */}
+                    <Box sx={{ 
+                      p: 1, 
+                      bgcolor: node.hearts_evaluation.significant_drift ? (node.hearts_evaluation.drift_score > 0 ? '#fff4e6' : '#e3f2fd') : 'grey.100',
+                      borderRadius: 1,
+                      border: node.hearts_evaluation.significant_drift ? '2px solid' : '1px solid',
+                      borderColor: node.hearts_evaluation.significant_drift ? (node.hearts_evaluation.drift_score > 0 ? 'warning.main' : 'info.main') : 'grey.300'
+                    }}>
+                      <Typography variant="caption" sx={{ display: 'block', mb: 0.3, fontWeight: 'bold' }}>
+                        Drift Score:
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '1.1em' }}>
+                        {node.hearts_evaluation.drift_score >= 0 ? '+' : ''}{node.hearts_evaluation.drift_score.toFixed(3)}
+                        <Typography component="span" sx={{ ml: 1, fontSize: '0.9em', fontWeight: 'normal' }}>
+                          ({node.hearts_evaluation.significant_drift ? '⚠️ Significant' : 'Not significant'})
+                        </Typography>
+                      </Typography>
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                        {node.hearts_evaluation.drift_score > 0 
+                          ? 'Priming increased stereotype tendency' 
+                          : node.hearts_evaluation.drift_score < 0 
+                            ? 'Priming decreased stereotype tendency'
+                            : 'No change from priming'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    Prediction: {node.hearts_evaluation.prediction || 'Unknown'} 
+                    ({(node.hearts_evaluation.confidence * 100).toFixed(0)}% score)
+                  </Typography>
+                )}
+                
                 {node.hearts_evaluation.token_importance && node.hearts_evaluation.token_importance.length > 0 && (
-                  <Box sx={{ mt: 1 }}>
+                  <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>
                       Top Biased Tokens:
                     </Typography>
@@ -2294,8 +2457,65 @@ function NodeDialog({ open, onClose, node, evaluating }) {
                   >
                     {node.transformation_details.conversation.turn2_response || ''}
                   </Typography>
+                  {node.hearts_evaluation?.confidence !== undefined && (
+                    <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                      <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'error.dark' }}>
+                        HEARTS Score: {(node.hearts_evaluation.confidence * 100).toFixed(1)}%
+                        {node.hearts_evaluation.is_stereotype ? ' (Stereotype Detected)' : ' (No Stereotype)'}
+                      </Typography>
+                    </Box>
+                  )}
                 </Paper>
               </Box>
+
+              {/* Control Response (No Priming) */}
+              {node.transformation_details.conversation.control_response && (
+                <Box sx={{ mt: 3, pt: 3, borderTop: '2px solid', borderColor: 'divider' }}>
+                  <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
+                    Control: Direct Response (No Priming)
+                  </Typography>
+                  <Paper sx={{ p: 1.5, mb: 1, bgcolor: 'background.paper' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      User (Direct Question):
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        whiteSpace: 'pre-wrap', 
+                        wordBreak: 'break-word',
+                        overflowWrap: 'break-word'
+                      }}
+                    >
+                      {node.transformation_details.conversation.original_prompt || ''}
+                    </Typography>
+                  </Paper>
+                  <Paper sx={{ p: 1.5, bgcolor: 'grey.100' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      Assistant (Unprimed Response):
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        whiteSpace: 'pre-wrap', 
+                        wordBreak: 'break-word',
+                        overflowWrap: 'break-word',
+                        maxHeight: '300px',
+                        overflow: 'auto'
+                      }}
+                    >
+                      {node.transformation_details.conversation.control_response}
+                    </Typography>
+                    {node.hearts_evaluation?.control_score !== undefined && (
+                      <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                        <Typography variant="caption" sx={{ display: 'block', fontWeight: 'bold', color: 'text.secondary' }}>
+                          HEARTS Score: {(node.hearts_evaluation.control_score * 100).toFixed(1)}%
+                          {node.hearts_evaluation.control_is_stereotype ? ' (Stereotype Detected)' : ' (No Stereotype)'}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Paper>
+                </Box>
+              )}
             </Paper>
           </Box>
         )}
