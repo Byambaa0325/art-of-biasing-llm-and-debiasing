@@ -78,6 +78,7 @@ RUN if [ "$ENABLE_HEARTS" = "true" ]; then \
 
 # Copy application code
 COPY backend/ ./backend/
+COPY data/ ./data/
 COPY .env* ./
 
 # Set environment variables
