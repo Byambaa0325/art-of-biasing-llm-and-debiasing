@@ -60,8 +60,9 @@ class DriftResultsClient:
                         If None, uses default location.
         """
         if results_dir is None:
-            # Default to drift analysis results
-            results_dir = Path("E:/UCL-Workspaces/bias-transfer-research/drift_analysis/results")
+            # Default to local drift analysis results
+            current_dir = Path(__file__).parent
+            results_dir = current_dir.parent / "data" / "drift_results"
 
         self.results_dir = Path(results_dir)
         if not self.results_dir.exists():
