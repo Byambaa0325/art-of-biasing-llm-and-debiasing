@@ -70,7 +70,7 @@ function App() {
   const [viewMode, setViewMode] = useState('input'); // 'input' or 'graph'
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [availableModels, setAvailableModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState('meta/llama-3.3-70b-instruct-maas'); // Default model
+  const [selectedModel, setSelectedModel] = useState('us.meta.llama3-1-70b-instruct-v1:0'); // Default model - Llama 3.1 70B
   const [apiKey, setApiKey] = useState(DEFAULT_API_KEY); // API key for authentication
   const [inputMode, setInputMode] = useState('custom'); // 'custom' or 'explore'
   const [exploreData, setExploreData] = useState(null); // Data from explore mode
@@ -1101,7 +1101,7 @@ function App() {
                   multiline
                   rows={6}
                   label="Enter your starter prompt"
-                  placeholder="Type your prompt here... (e.g., 'What are the benefits of exercise?' or 'Why are women always so emotional?')"
+                  placeholder="Try an incomplete sentence like: 'Many Germans are' or 'The supervisor is' or 'Women typically'"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   onKeyDown={(e) => {
@@ -1518,7 +1518,8 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
               fontWeight: 'bold',
               bgcolor: node.hearts_evaluation.is_stereotype ? '#fee' : '#efe',
               borderColor: node.hearts_evaluation.is_stereotype ? '#f66' : '#6f6',
-              border: '1px solid'
+              border: '1px solid',
+              color: node.hearts_evaluation.is_stereotype ? '#c00' : '#060',
             }}
             title={`HEARTS ALBERT-v2 stereotype detection - Confidence: ${(node.hearts_evaluation.confidence * 100).toFixed(0)}%`}
           />
@@ -1546,7 +1547,11 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                 node.claude_evaluation.severity === 'severe' || node.claude_evaluation.severity === 'high' ? '#ff6b6b' :
                 node.claude_evaluation.severity === 'medium' ? '#ffc107' : 
                 node.claude_evaluation.severity === 'low' ? '#4caf50' : '#999',
-              border: '1px solid'
+              border: '1px solid',
+              color: 
+                node.claude_evaluation.severity === 'severe' || node.claude_evaluation.severity === 'high' ? '#c00' :
+                node.claude_evaluation.severity === 'medium' ? '#856404' : 
+                node.claude_evaluation.severity === 'low' ? '#155724' : '#333',
             }}
             title={`Claude ${node.claude_evaluation.model || '3.5 Sonnet'} zero-shot bias evaluation - ${node.claude_evaluation.bias_types?.length || 0} bias types detected`}
           />
@@ -1564,7 +1569,13 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
             sx={{ 
               fontSize: '9px', 
               height: '20px',
-              fontWeight: 'bold'
+              fontWeight: 'bold',
+              bgcolor:
+                node.gemini_evaluation.severity === 'severe' || node.gemini_evaluation.severity === 'high' ? '#ffe0e0' :
+                node.gemini_evaluation.severity === 'medium' ? '#fff4e0' : '#e8f5e9',
+              color:
+                node.gemini_evaluation.severity === 'severe' || node.gemini_evaluation.severity === 'high' ? '#c00' :
+                node.gemini_evaluation.severity === 'medium' ? '#856404' : '#155724',
             }}
             title={`Gemini 2.5 Flash validation`}
           />
@@ -1585,7 +1596,9 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
                 mr: 0.5,
                 fontSize: '9px', 
                 height: '18px',
-                display: 'inline-flex'
+                display: 'inline-flex',
+                bgcolor: metric.score > 0.6 ? '#ffe0e0' : metric.score > 0.3 ? '#fff4e0' : '#e8f5e9',
+                color: metric.score > 0.6 ? '#c00' : metric.score > 0.3 ? '#856404' : '#155724',
               }}
               title={`${metric.description} (${metric.framework || metric.model || ''})`}
             />
@@ -1599,7 +1612,13 @@ function NodeLabel({ node, nodeId, isPotential, pathData, parentId, parentPrompt
           label={`Bias: ${(node.bias_score * 100).toFixed(0)}%`}
           size="small"
           color={node.bias_score > 0.6 ? 'error' : node.bias_score > 0.3 ? 'warning' : 'success'}
-          sx={{ mb: 1, fontSize: '10px', height: '20px' }}
+          sx={{ 
+            mb: 1, 
+            fontSize: '10px', 
+            height: '20px',
+            bgcolor: node.bias_score > 0.6 ? '#ffe0e0' : node.bias_score > 0.3 ? '#fff4e0' : '#e8f5e9',
+            color: node.bias_score > 0.6 ? '#c00' : node.bias_score > 0.3 ? '#856404' : '#155724',
+          }}
         />
       )}
 

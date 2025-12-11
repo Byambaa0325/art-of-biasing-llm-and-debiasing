@@ -41,14 +41,15 @@ class ModelResultsClient:
     ]
 
     OLLAMA_MODELS = [
-        'llama3.1:8b',
-        'llama3.2:3b',
-        'llama3.2:1b',
-        'mistral:7b',
-        'gemma2:9b',
-        'qwen2.5:7b',
-        'deepseek-llm:7b',
-        'gpt-oss:20b-cloud',
+        # Ollama models excluded per user request
+        # 'llama3.1:8b',
+        # 'llama3.2:3b',
+        # 'llama3.2:1b',
+        # 'mistral:7b',
+        # 'gemma2:9b',
+        # 'qwen2.5:7b',
+        # 'deepseek-llm:7b',  # Explicitly excluded
+        # 'gpt-oss:20b-cloud',
     ]
 
     def __init__(self, results_dir: Optional[str] = None):
